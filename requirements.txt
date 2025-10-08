@@ -1,0 +1,10 @@
+# Core dependencies
+google-genai>=0.2.0
+openai-whisper>=20231117
+
+# Video processing
+yt-dlp>=2023.11.16
+static-ffmpeg>=2.5
+
+# System dependencies (automatically handled by static-ffmpeg)
+# FFmpeg will be automatically downloaded when installing static-ffmpeg
