@@ -12,17 +12,39 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 設定 FFmpeg 路徑（使用 static-ffmpeg）
-try:
-    from static_ffmpeg import run
-    # 取得 static-ffmpeg 提供的 ffmpeg 路徑
-    ffmpeg_path, ffprobe_path = run.get_or_fetch_platform_executables_else_raise()
-    FFMPEG_CMD = ffmpeg_path
-except ImportError:
-    # 如果沒有安裝 static-ffmpeg，嘗試使用系統的 ffmpeg
-    FFMPEG_CMD = "ffmpeg"
-except Exception as e:
-    # 降級到系統 ffmpeg
-    FFMPEG_CMD = "ffmpeg"
+FFMPEG_CMD = "ffmpeg"  # 預設值
+FFMPEG_AVAILABLE = False
+
+def get_ffmpeg_path():
+    """取得 FFmpeg 路徑"""
+    global FFMPEG_CMD, FFMPEG_AVAILABLE
+
+    try:
+        from static_ffmpeg import run
+        # 取得 static-ffmpeg 提供的 ffmpeg 路徑
+        ffmpeg_path, ffprobe_path = run.get_or_fetch_platform_executables_else_raise()
+        FFMPEG_CMD = ffmpeg_path
+        FFMPEG_AVAILABLE = True
+        return ffmpeg_path
+    except ImportError:
+        # 如果沒有安裝 static-ffmpeg，嘗試使用系統的 ffmpeg
+        pass
+    except Exception as e:
+        # 其他錯誤，記錄但不中斷
+        print(f"⚠️  static-ffmpeg 初始化警告: {e}")
+
+    # 嘗試使用系統的 ffmpeg
+    try:
+        import shutil
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            FFMPEG_CMD = system_ffmpeg
+            FFMPEG_AVAILABLE = True
+            return system_ffmpeg
+    except:
+        pass
+
+    return "ffmpeg"  # 降級到預設值
 
 class VideoSubtitleProcessor:
     def __init__(
@@ -988,11 +1010,16 @@ def main():
     
     # 檢查必要工具
     missing_tools = []
-    
-    # 檢查 ffmpeg（總是需要）
+
+    # 檢查並初始化 ffmpeg
+    print("🔍 檢查 FFmpeg...")
+    ffmpeg_path = get_ffmpeg_path()
+
     try:
-        subprocess.run([FFMPEG_CMD, "-version"], capture_output=True, check=True, timeout=5)
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        result = subprocess.run([ffmpeg_path, "-version"], capture_output=True, check=True, timeout=5)
+        print(f"✅ FFmpeg 已就緒: {ffmpeg_path}")
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+        print(f"❌ FFmpeg 檢查失敗: {e}")
         missing_tools.append("ffmpeg")
     
     # 檢查 yt-dlp（僅在需要下載 YouTube 影片時）

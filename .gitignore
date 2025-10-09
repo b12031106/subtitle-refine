@@ -37,6 +37,10 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+.python-version
+
+# Claude Code
+.claude/settings.local.json
 
 # Project specific
 downloads/
@@ -46,8 +50,13 @@ output/
 *.mkv
 *.avi
 *.mov
+*.webm
+*.flv
 *.srt
+*.ass
+*.vtt
 !example.srt
+backup_*.srt
 
 # API Keys & Secrets
 .env

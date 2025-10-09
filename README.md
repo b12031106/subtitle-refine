@@ -1,24 +1,30 @@
-# Video Subtitle Tool
+# Subtitle Refine
 
-自動化影片字幕處理工具 - 支援 YouTube 下載、Whisper 轉錄、Gemini AI 校正/翻譯、FFmpeg 嵌入字幕
+AI 驅動的字幕精煉工具 - 自動校正語音辨識錯誤並翻譯字幕
 
-## 功能特色
+支援 YouTube 下載、Whisper 轉錄、Gemini AI 校正/翻譯、FFmpeg 嵌入字幕
 
+## 核心特色
+
+### 🎯 雙重 AI 處理流程（與其他工具的差異）
+- **第一步：AI 校正** - 修正 Whisper 語音辨識的錯別字、同音字、斷句錯誤
+- **第二步：AI 翻譯** - 在校正後的基礎上進行高品質翻譯
+
+### ⚡ 其他功能
 - 🎬 **YouTube 影片下載** - 使用 yt-dlp 下載 YouTube 影片
 - 🎤 **自動字幕轉錄** - 使用 OpenAI Whisper 進行語音轉文字
-- 🤖 **AI 智能校正/翻譯** - 使用 Google Gemini AI 校正錯別字或翻譯字幕
-- ⚡ **平行處理** - 自動分段並平行處理，大幅提升速度
+- 📊 **平行處理** - 自動分段並平行處理，大幅提升速度
 - 🔧 **自動格式修正** - 自動修正 SRT 時間戳格式錯誤
-- 📊 **詳細統計資訊** - 顯示 token 使用量、處理進度等
-- 🎯 **智能重試機制** - 遇到 token 限制自動切分重試
+- 📈 **詳細統計資訊** - 顯示 token 使用量、處理進度等
+- 🔄 **智能重試機制** - 遇到 token 限制自動切分重試
 
 ## 安裝
 
 ### 1. 克隆倉庫
 
 ```bash
-git clone https://github.com/yourusername/video-subtitle.git
-cd video-subtitle
+git clone https://github.com/yourusername/subtitle-refine.git
+cd subtitle-refine
 ```
 
 ### 2. 安裝依賴
@@ -38,7 +44,7 @@ pip install -r requirements.txt
 ### 完整流程：處理 YouTube 影片並翻譯
 
 ```bash
-python video_subtitle_tool.py \
+python subtitle_refine.py \
   --youtube "https://www.youtube.com/watch?v=xxxxx" \
   --api-key "YOUR_GEMINI_API_KEY" \
   --translate zh-TW
@@ -47,7 +53,7 @@ python video_subtitle_tool.py \
 ### 處理本地影片
 
 ```bash
-python video_subtitle_tool.py \
+python subtitle_refine.py \
   --video "./video.mp4" \
   --api-key "YOUR_API_KEY" \
   --source-lang en \
@@ -57,7 +63,7 @@ python video_subtitle_tool.py \
 ### 僅校正現有字幕並嵌入影片
 
 ```bash
-python video_subtitle_tool.py \
+python subtitle_refine.py \
   --video "./video.mp4" \
   --subtitle "./video.srt" \
   --api-key "YOUR_API_KEY"
@@ -66,7 +72,7 @@ python video_subtitle_tool.py \
 ### 純字幕嵌入（不使用 AI）
 
 ```bash
-python video_subtitle_tool.py \
+python subtitle_refine.py \
   --video "./video.mp4" \
   --subtitle "./video_translated.srt" \
   --only-embed
@@ -146,14 +152,15 @@ python video_subtitle_tool.py \
 ## 專案結構
 
 ```
-video-subtitle/
-├── video_subtitle_tool.py  # 主程式
-├── requirements.txt        # Python 依賴
-├── .gitignore             # Git 忽略規則
-├── README.md              # 說明文件
-├── downloads/             # YouTube 下載目錄（自動創建）
-├── subtitles/             # 字幕輸出目錄（自動創建）
-└── output/                # 最終影片輸出目錄（自動創建）
+subtitle-refine/
+├── subtitle_refine.py     # 主程式
+├── requirements.txt       # Python 依賴
+├── .gitignore            # Git 忽略規則
+├── README.md             # 說明文件
+├── USAGE_EXAMPLES.md     # 使用範例
+├── downloads/            # YouTube 下載目錄（自動創建）
+├── subtitles/            # 字幕輸出目錄（自動創建）
+└── output/               # 最終影片輸出目錄（自動創建）
 ```
 
 ## 注意事項
