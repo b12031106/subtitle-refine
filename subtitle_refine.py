@@ -48,15 +48,15 @@ def get_ffmpeg_path():
 
 class VideoSubtitleProcessor:
     def __init__(
-        self, 
-        gemini_api_key: Optional[str] = None, 
-        whisper_model: str = "base", 
+        self,
+        gemini_api_key: Optional[str] = None,
+        whisper_model: str = "base",
         source_language: str = "zh",
         gemini_model: str = "gemini-2.5-flash"
     ):
         """
         初始化影片字幕處理器
-        
+
         Args:
             gemini_api_key: Gemini API 金鑰（only-embed 模式可以不提供）
             whisper_model: Whisper 模型大小 (tiny, base, small, medium, large)
@@ -66,7 +66,7 @@ class VideoSubtitleProcessor:
         self.whisper_model = whisper_model
         self.source_language = source_language
         self.gemini_model = gemini_model
-        
+
         # 只在有 API key 時才初始化 Gemini client
         if gemini_api_key:
             os.environ['GEMINI_API_KEY'] = gemini_api_key
@@ -123,21 +123,21 @@ class VideoSubtitleProcessor:
     def transcribe_video(self, video_path: str, output_dir: str = "./subtitles") -> str:
         """
         使用 Whisper 轉錄影片字幕
-        
+
         Args:
             video_path: 影片檔案路徑
             output_dir: 字幕輸出目錄
-            
+
         Returns:
             字幕檔案路徑 (.srt)
         """
         lang_display = "自動偵測" if self.source_language == "auto" else self.source_language
         print(f"🎤 正在使用 Whisper 轉錄字幕 (模型: {self.whisper_model}, 語言: {lang_display})...")
-        
+
         os.makedirs(output_dir, exist_ok=True)
         video_name = Path(video_path).stem
         subtitle_path = os.path.join(output_dir, f"{video_name}.srt")
-        
+
         cmd = [
             "whisper",
             video_path,
@@ -145,11 +145,11 @@ class VideoSubtitleProcessor:
             "--output_format", "srt",
             "--output_dir", output_dir
         ]
-        
+
         # 如果不是自動偵測，則指定語言
         if self.source_language != "auto":
             cmd.extend(["--language", self.source_language])
-        
+
         try:
             subprocess.run(cmd, check=True)
             print(f"✅ 字幕轉錄完成: {subtitle_path}")
@@ -916,25 +916,25 @@ def main():
         epilog="""
 使用範例:
   # 完整流程：處理 YouTube 影片
-  python subtitle_tool.py --youtube "https://www.youtube.com/watch?v=xxxxx" --api-key "YOUR_GEMINI_API_KEY"
-  
+  python subtitle_refine.py --youtube "https://www.youtube.com/watch?v=xxxxx" --api-key "YOUR_GEMINI_API_KEY"
+
   # 完整流程：處理本地英文影片並翻譯成繁體中文
-  python subtitle_tool.py --video "./video.mp4" --api-key "KEY" --source-lang en --translate zh-TW
-  
+  python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --source-lang en --translate zh-TW
+
   # 跳過下載和轉錄：僅校正/翻譯現有字幕並嵌入影片
-  python subtitle_tool.py --video "./video.mp4" --subtitle "./video.srt" --api-key "KEY" --translate en
-  
+  python subtitle_refine.py --video "./video.mp4" --subtitle "./video.srt" --api-key "KEY" --translate en
+
   # 純字幕嵌入：直接將已處理好的字幕嵌入影片（不使用 AI）
-  python subtitle_tool.py --video "./video.mp4" --subtitle "./video_translated.srt" --only-embed
-  
+  python subtitle_refine.py --video "./video.mp4" --subtitle "./video_translated.srt" --only-embed
+
   # 使用自定義 Gemini 模型
-  python subtitle_tool.py --video "./video.mp4" --api-key "KEY" --gemini-model "gemini-2.5-pro"
-  
+  python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --gemini-model "gemini-2.5-pro"
+
 支援的語言代碼:
   zh/zh-TW (繁體中文), zh-CN (簡體中文), en (英文), ja (日文), ko (韓文)
   es (西班牙文), fr (法文), de (德文), it (義大利文), pt (葡萄牙文)
   ru (俄文), ar (阿拉伯文), th (泰文), vi (越南文), auto (自動偵測)
-  
+
 可用的 Gemini 模型:
   gemini-2.5-flash (推薦，性價比最高)
   gemini-2.5-flash-lite (最快，成本最低)
