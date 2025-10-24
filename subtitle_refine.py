@@ -971,6 +971,7 @@ class VideoSubtitleProcessor:
         # 步驟 0: 如果是 YouTube 影片且沒有提供現有字幕，檢查 CC 字幕
         use_cc_subtitle = False
         cc_subtitle_path = None
+        skip_correction_for_cc = False  # 用於記錄使用者對 CC 字幕的校正選擇
 
         if is_youtube and not existing_subtitle and not only_embed:
             available_subs = self.list_youtube_subtitles(input_source)
@@ -1025,6 +1026,71 @@ class VideoSubtitleProcessor:
                         )
                         use_cc_subtitle = True
                         print("✅ 已下載 YouTube 字幕，將跳過 Whisper 轉錄步驟")
+
+                        # 詢問是否需要 Gemini 處理
+                        print("\n" + "-" * 60)
+                        print("🤔 是否需要使用 Gemini AI 處理這個字幕？")
+                        print("-" * 60)
+
+                        if target_language:
+                            print(f"✨ 您設定了翻譯目標語言：{target_language}")
+                            print("\n選項：")
+                            print("  [1] 使用 Gemini 校正 + 翻譯（推薦，確保翻譯品質）")
+                            print("  [2] 僅使用 Gemini 翻譯（跳過校正）")
+                            print("  [3] 都不使用（直接使用原始字幕，不翻譯）")
+
+                            while True:
+                                try:
+                                    ai_choice = input("\n請選擇 [1-3]: ")
+                                    ai_choice_num = int(ai_choice)
+                                    if 1 <= ai_choice_num <= 3:
+                                        break
+                                    else:
+                                        print("⚠️  請輸入 1 到 3 之間的數字")
+                                except ValueError:
+                                    print("⚠️  請輸入有效的數字")
+                                except KeyboardInterrupt:
+                                    print("\n\n❌ 使用者取消操作")
+                                    sys.exit(0)
+
+                            if ai_choice_num == 1:
+                                print("\n✅ 將使用 Gemini 校正 + 翻譯")
+                                skip_correction_for_cc = False
+                            elif ai_choice_num == 2:
+                                print("\n✅ 將僅使用 Gemini 翻譯")
+                                skip_correction_for_cc = False
+                                # 這裡保持 skip_correction_for_cc = False，但我們會在後面只做翻譯
+                            else:
+                                print("\n✅ 將直接使用原始字幕（不校正、不翻譯）")
+                                skip_correction_for_cc = True
+                        else:
+                            print("\n選項：")
+                            print("  [1] 使用 Gemini 校正字幕（修正錯誤、優化斷句）")
+                            print("  [2] 直接使用原始字幕（不校正）")
+
+                            while True:
+                                try:
+                                    ai_choice = input("\n請選擇 [1-2]: ")
+                                    ai_choice_num = int(ai_choice)
+                                    if 1 <= ai_choice_num <= 2:
+                                        break
+                                    else:
+                                        print("⚠️  請輸入 1 到 2 之間的數字")
+                                except ValueError:
+                                    print("⚠️  請輸入有效的數字")
+                                except KeyboardInterrupt:
+                                    print("\n\n❌ 使用者取消操作")
+                                    sys.exit(0)
+
+                            if ai_choice_num == 1:
+                                print("\n✅ 將使用 Gemini 校正字幕")
+                                skip_correction_for_cc = False
+                            else:
+                                print("\n✅ 將直接使用原始字幕")
+                                skip_correction_for_cc = True
+
+                        print("-" * 60)
+
                     except Exception as e:
                         print(f"❌ 下載字幕失敗: {e}")
                         print("⚠️  將改用 Whisper 轉錄")
@@ -1078,21 +1144,27 @@ class VideoSubtitleProcessor:
             subtitle_path = self.transcribe_video(video_path)
         
         # 步驟 3: AI 校正/翻譯字幕（可選）
-        if not skip_correction:
+        # 合併原本的 skip_correction 參數和 CC 字幕的使用者選擇
+        should_skip_correction = skip_correction or skip_correction_for_cc
+
+        if not should_skip_correction:
             subtitle_content = self.read_subtitle_file(subtitle_path)
             corrected_content = self.correct_subtitle_with_llm(
-                subtitle_content, 
+                subtitle_content,
                 custom_prompt=custom_prompt,
                 context=context,
                 target_language=target_language
             )
             subtitle_path = self.save_corrected_subtitle(
-                corrected_content, 
+                corrected_content,
                 subtitle_path,
                 target_language=target_language
             )
         else:
-            print("⏭️  跳過 AI 字幕校正")
+            if skip_correction_for_cc:
+                print("⏭️  根據使用者選擇，跳過 AI 字幕處理")
+            else:
+                print("⏭️  跳過 AI 字幕校正")
         
         # 步驟 4: 嵌入字幕到影片
         output_video_path = self.embed_subtitle_to_video(video_path, subtitle_path)
