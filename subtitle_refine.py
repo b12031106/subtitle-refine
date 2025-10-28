@@ -119,7 +119,133 @@ class VideoSubtitleProcessor:
             raise
             
         raise Exception("無法找到下載的影片檔案")
-    
+
+    def list_youtube_subtitles(self, url: str) -> dict:
+        """
+        列出 YouTube 影片可用的字幕（CC 字幕和自動生成的字幕）
+
+        Args:
+            url: YouTube 影片網址
+
+        Returns:
+            字典包含 'manual' 和 'auto' 兩個鍵，每個鍵對應一個語言代碼列表
+            例如: {'manual': ['en', 'zh-TW'], 'auto': ['ja', 'ko']}
+        """
+        print(f"🔍 正在檢查 YouTube 影片的可用字幕...")
+
+        cmd = ["yt-dlp", "--list-subs", url]
+
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            output = result.stdout
+
+            manual_subs = []
+            auto_subs = []
+
+            # 解析輸出
+            in_manual_section = False
+            in_auto_section = False
+
+            for line in output.split('\n'):
+                line = line.strip()
+
+                # 檢測區段標題
+                if 'Available subtitles' in line or 'manual' in line.lower():
+                    in_manual_section = True
+                    in_auto_section = False
+                    continue
+                elif 'auto-generated' in line.lower() or 'automatic captions' in line.lower():
+                    in_auto_section = True
+                    in_manual_section = False
+                    continue
+
+                # 解析語言代碼（格式通常是 "語言代碼 語言名稱"）
+                # 例如: "en      English"
+                if in_manual_section or in_auto_section:
+                    # 匹配語言代碼（通常在行首）
+                    match = re.match(r'^([a-z]{2}(?:-[A-Z]{2})?)\s+', line)
+                    if match:
+                        lang_code = match.group(1)
+                        if in_manual_section:
+                            manual_subs.append(lang_code)
+                        elif in_auto_section:
+                            auto_subs.append(lang_code)
+
+            result_dict = {
+                'manual': manual_subs,
+                'auto': auto_subs
+            }
+
+            # 顯示找到的字幕
+            if manual_subs or auto_subs:
+                print(f"✅ 找到可用字幕:")
+                if manual_subs:
+                    print(f"   📝 手動字幕 (CC): {', '.join(manual_subs)}")
+                if auto_subs:
+                    print(f"   🤖 自動生成: {', '.join(auto_subs)}")
+            else:
+                print(f"ℹ️  未找到可用字幕")
+
+            return result_dict
+
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  無法列出字幕: {e.stderr}")
+            return {'manual': [], 'auto': []}
+
+    def download_youtube_subtitle(self, url: str, lang: str, is_auto: bool = False, output_dir: str = "./subtitles") -> str:
+        """
+        下載 YouTube 影片的字幕
+
+        Args:
+            url: YouTube 影片網址
+            lang: 字幕語言代碼（例如: 'en', 'zh-TW'）
+            is_auto: 是否為自動生成的字幕
+            output_dir: 輸出目錄
+
+        Returns:
+            下載的字幕檔案路徑
+        """
+        subtitle_type = "自動生成字幕" if is_auto else "手動字幕 (CC)"
+        print(f"📥 正在下載 {subtitle_type} ({lang})...")
+
+        os.makedirs(output_dir, exist_ok=True)
+        output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
+
+        cmd = [
+            "yt-dlp",
+            "--skip-download",  # 不下載影片
+            "--write-subs" if not is_auto else "--write-auto-subs",  # 下載字幕
+            "--sub-lang", lang,
+            "--sub-format", "srt",  # 強制使用 SRT 格式
+            "--convert-subs", "srt",  # 轉換為 SRT 格式
+            "-o", output_template,
+            url
+        ]
+
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+            # 尋找下載的字幕檔案
+            # yt-dlp 會生成類似 "影片標題.語言代碼.srt" 的檔案
+            subtitle_files = list(Path(output_dir).glob(f"*.{lang}.srt"))
+
+            if not subtitle_files:
+                # 嘗試其他可能的格式
+                subtitle_files = list(Path(output_dir).glob("*.srt"))
+
+            if subtitle_files:
+                # 取得最新的字幕檔案
+                latest_file = max(subtitle_files, key=lambda p: p.stat().st_mtime)
+                subtitle_path = str(latest_file)
+                print(f"✅ 字幕下載完成: {subtitle_path}")
+                return subtitle_path
+            else:
+                raise Exception(f"無法找到下載的字幕檔案（語言: {lang}）")
+
+        except subprocess.CalledProcessError as e:
+            print(f"❌ 字幕下載失敗: {e.stderr}")
+            raise
+
     def transcribe_video(self, video_path: str, output_dir: str = "./subtitles") -> str:
         """
         使用 Whisper 轉錄影片字幕
@@ -841,7 +967,139 @@ class VideoSubtitleProcessor:
         print("=" * 60)
         print("🚀 開始處理影片字幕")
         print("=" * 60)
-        
+
+        # 步驟 0: 如果是 YouTube 影片且沒有提供現有字幕，檢查 CC 字幕
+        use_cc_subtitle = False
+        cc_subtitle_path = None
+        skip_correction_for_cc = False  # 用於記錄使用者對 CC 字幕的校正選擇
+
+        if is_youtube and not existing_subtitle and not only_embed:
+            available_subs = self.list_youtube_subtitles(input_source)
+
+            # 如果有可用的字幕，詢問使用者
+            if available_subs['manual'] or available_subs['auto']:
+                print("\n" + "=" * 60)
+                print("💡 發現 YouTube 提供的字幕！")
+                print("=" * 60)
+
+                # 合併手動和自動字幕列表
+                all_subs = []
+                if available_subs['manual']:
+                    for lang in available_subs['manual']:
+                        all_subs.append((lang, False, '手動 (CC)'))
+                if available_subs['auto']:
+                    for lang in available_subs['auto']:
+                        all_subs.append((lang, True, '自動生成'))
+
+                # 顯示選項
+                print("\n可用的字幕選項：")
+                print("  [0] 不使用 YouTube 字幕，使用 Whisper 轉錄")
+                for idx, (lang, is_auto, subtitle_type) in enumerate(all_subs, 1):
+                    print(f"  [{idx}] 使用 {lang} 字幕 ({subtitle_type})")
+
+                # 讀取使用者選擇
+                while True:
+                    try:
+                        choice = input("\n請選擇 [0-{}]: ".format(len(all_subs)))
+                        choice_num = int(choice)
+                        if 0 <= choice_num <= len(all_subs):
+                            break
+                        else:
+                            print(f"⚠️  請輸入 0 到 {len(all_subs)} 之間的數字")
+                    except ValueError:
+                        print("⚠️  請輸入有效的數字")
+                    except KeyboardInterrupt:
+                        print("\n\n❌ 使用者取消操作")
+                        sys.exit(0)
+
+                if choice_num > 0:
+                    # 使用者選擇使用 CC 字幕
+                    selected_lang, selected_is_auto, selected_type = all_subs[choice_num - 1]
+                    print(f"\n✅ 將使用 {selected_lang} 字幕 ({selected_type})")
+
+                    # 下載選擇的字幕
+                    try:
+                        cc_subtitle_path = self.download_youtube_subtitle(
+                            input_source,
+                            selected_lang,
+                            selected_is_auto
+                        )
+                        use_cc_subtitle = True
+                        print("✅ 已下載 YouTube 字幕，將跳過 Whisper 轉錄步驟")
+
+                        # 詢問是否需要 Gemini 處理
+                        print("\n" + "-" * 60)
+                        print("🤔 是否需要使用 Gemini AI 處理這個字幕？")
+                        print("-" * 60)
+
+                        if target_language:
+                            print(f"✨ 您設定了翻譯目標語言：{target_language}")
+                            print("\n選項：")
+                            print("  [1] 使用 Gemini 校正 + 翻譯（推薦，確保翻譯品質）")
+                            print("  [2] 僅使用 Gemini 翻譯（跳過校正）")
+                            print("  [3] 都不使用（直接使用原始字幕，不翻譯）")
+
+                            while True:
+                                try:
+                                    ai_choice = input("\n請選擇 [1-3]: ")
+                                    ai_choice_num = int(ai_choice)
+                                    if 1 <= ai_choice_num <= 3:
+                                        break
+                                    else:
+                                        print("⚠️  請輸入 1 到 3 之間的數字")
+                                except ValueError:
+                                    print("⚠️  請輸入有效的數字")
+                                except KeyboardInterrupt:
+                                    print("\n\n❌ 使用者取消操作")
+                                    sys.exit(0)
+
+                            if ai_choice_num == 1:
+                                print("\n✅ 將使用 Gemini 校正 + 翻譯")
+                                skip_correction_for_cc = False
+                            elif ai_choice_num == 2:
+                                print("\n✅ 將僅使用 Gemini 翻譯")
+                                skip_correction_for_cc = False
+                                # 這裡保持 skip_correction_for_cc = False，但我們會在後面只做翻譯
+                            else:
+                                print("\n✅ 將直接使用原始字幕（不校正、不翻譯）")
+                                skip_correction_for_cc = True
+                        else:
+                            print("\n選項：")
+                            print("  [1] 使用 Gemini 校正字幕（修正錯誤、優化斷句）")
+                            print("  [2] 直接使用原始字幕（不校正）")
+
+                            while True:
+                                try:
+                                    ai_choice = input("\n請選擇 [1-2]: ")
+                                    ai_choice_num = int(ai_choice)
+                                    if 1 <= ai_choice_num <= 2:
+                                        break
+                                    else:
+                                        print("⚠️  請輸入 1 到 2 之間的數字")
+                                except ValueError:
+                                    print("⚠️  請輸入有效的數字")
+                                except KeyboardInterrupt:
+                                    print("\n\n❌ 使用者取消操作")
+                                    sys.exit(0)
+
+                            if ai_choice_num == 1:
+                                print("\n✅ 將使用 Gemini 校正字幕")
+                                skip_correction_for_cc = False
+                            else:
+                                print("\n✅ 將直接使用原始字幕")
+                                skip_correction_for_cc = True
+
+                        print("-" * 60)
+
+                    except Exception as e:
+                        print(f"❌ 下載字幕失敗: {e}")
+                        print("⚠️  將改用 Whisper 轉錄")
+                        use_cc_subtitle = False
+                else:
+                    print("\n✅ 將使用 Whisper 轉錄")
+
+                print("=" * 60 + "\n")
+
         # 步驟 1: 取得影片
         if skip_download and not is_youtube:
             video_path = input_source
@@ -871,7 +1129,11 @@ class VideoSubtitleProcessor:
             return output_video_path
         
         # 步驟 2: 轉錄字幕
-        if existing_subtitle:
+        if use_cc_subtitle:
+            # 使用下載的 CC 字幕
+            subtitle_path = cc_subtitle_path
+            print(f"⏭️  使用 YouTube CC 字幕: {subtitle_path}")
+        elif existing_subtitle:
             subtitle_path = existing_subtitle
             if not os.path.exists(subtitle_path):
                 raise FileNotFoundError(f"找不到字幕檔案: {subtitle_path}")
@@ -882,21 +1144,27 @@ class VideoSubtitleProcessor:
             subtitle_path = self.transcribe_video(video_path)
         
         # 步驟 3: AI 校正/翻譯字幕（可選）
-        if not skip_correction:
+        # 合併原本的 skip_correction 參數和 CC 字幕的使用者選擇
+        should_skip_correction = skip_correction or skip_correction_for_cc
+
+        if not should_skip_correction:
             subtitle_content = self.read_subtitle_file(subtitle_path)
             corrected_content = self.correct_subtitle_with_llm(
-                subtitle_content, 
+                subtitle_content,
                 custom_prompt=custom_prompt,
                 context=context,
                 target_language=target_language
             )
             subtitle_path = self.save_corrected_subtitle(
-                corrected_content, 
+                corrected_content,
                 subtitle_path,
                 target_language=target_language
             )
         else:
-            print("⏭️  跳過 AI 字幕校正")
+            if skip_correction_for_cc:
+                print("⏭️  根據使用者選擇，跳過 AI 字幕處理")
+            else:
+                print("⏭️  跳過 AI 字幕校正")
         
         # 步驟 4: 嵌入字幕到影片
         output_video_path = self.embed_subtitle_to_video(video_path, subtitle_path)
