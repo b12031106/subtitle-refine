@@ -77,26 +77,29 @@ class VideoSubtitleProcessor:
     def download_youtube_video(self, url: str, output_dir: str = "./downloads") -> str:
         """
         使用 yt-dlp 下載 YouTube 影片
-        
+
         Args:
             url: YouTube 影片網址
             output_dir: 輸出目錄
-            
+
         Returns:
             下載的影片檔案路徑
         """
         print(f"📥 正在下載 YouTube 影片: {url}")
-        
+
         os.makedirs(output_dir, exist_ok=True)
         output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
-        
+
+        # 使用 Android 客戶端來繞過 YouTube 的限制（避免 403 錯誤）
+        # 先嘗試下載最佳品質，如果失敗則降級
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-f", "best[ext=mp4]/best",  # 簡化格式選擇，優先選擇 mp4
+            "--extractor-args", "youtube:player_client=android",
             "-o", output_template,
             url
         ]
-        
+
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             
@@ -129,7 +132,7 @@ class VideoSubtitleProcessor:
 
         Returns:
             字典包含 'manual' 和 'auto' 兩個鍵，每個鍵對應一個語言代碼列表
-            例如: {'manual': ['en', 'zh-TW'], 'auto': ['ja', 'ko']}
+            例如: {'manual': ['en', 'zh-Hant'], 'auto': ['ja', 'ko']}
         """
         print(f"🔍 正在檢查 YouTube 影片的可用字幕...")
 
@@ -147,29 +150,40 @@ class VideoSubtitleProcessor:
             in_auto_section = False
 
             for line in output.split('\n'):
+                original_line = line
                 line = line.strip()
 
-                # 檢測區段標題
-                if 'Available subtitles' in line or 'manual' in line.lower():
+                # 檢測區段標題（注意 yt-dlp 的實際輸出格式）
+                if '[info] Available subtitles for' in original_line:
+                    # 手動字幕（CC 字幕）
                     in_manual_section = True
                     in_auto_section = False
                     continue
-                elif 'auto-generated' in line.lower() or 'automatic captions' in line.lower():
+                elif '[info] Available automatic captions for' in original_line:
+                    # 自動生成字幕
                     in_auto_section = True
                     in_manual_section = False
                     continue
 
-                # 解析語言代碼（格式通常是 "語言代碼 語言名稱"）
-                # 例如: "en      English"
+                # 跳過標題行（包含 "Language"、"Name"、"Formats" 的行）
+                if 'Language' in line and 'Formats' in line:
+                    continue
+
+                # 解析語言代碼
+                # YouTube 使用的語言代碼格式：en, zh-Hant, zh-Hans, pt-PT, en-US 等
+                # 格式：語言代碼 + 空格 + 語言名稱（可選）+ 空格 + 格式列表
                 if in_manual_section or in_auto_section:
-                    # 匹配語言代碼（通常在行首）
-                    match = re.match(r'^([a-z]{2}(?:-[A-Z]{2})?)\s+', line)
+                    # 匹配語言代碼（支援更多格式）
+                    # 例如：zh-Hant, en, pt-PT, zh-Hans-CN
+                    match = re.match(r'^([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4}(?:-[a-zA-Z]{2})?)?)\s+', line)
                     if match:
                         lang_code = match.group(1)
                         if in_manual_section:
-                            manual_subs.append(lang_code)
+                            if lang_code not in manual_subs:  # 避免重複
+                                manual_subs.append(lang_code)
                         elif in_auto_section:
-                            auto_subs.append(lang_code)
+                            if lang_code not in auto_subs:  # 避免重複
+                                auto_subs.append(lang_code)
 
             result_dict = {
                 'manual': manual_subs,
@@ -1148,6 +1162,13 @@ class VideoSubtitleProcessor:
         should_skip_correction = skip_correction or skip_correction_for_cc
 
         if not should_skip_correction:
+            # 在實際需要使用 Gemini 時，檢查是否有 API key
+            if not self.client:
+                raise ValueError(
+                    "需要 Gemini API key 才能使用 AI 校正/翻譯功能。\n"
+                    "請使用 --api-key 參數提供 API key，或使用 --skip-correction 跳過 AI 處理。"
+                )
+
             subtitle_content = self.read_subtitle_file(subtitle_path)
             corrected_content = self.correct_subtitle_with_llm(
                 subtitle_content,
@@ -1273,8 +1294,12 @@ def main():
             parser.error("--only-embed mode cannot be used with --youtube")
     
     # 檢查 API key（僅在需要 AI 處理時）
+    # 注意：對於 YouTube 來源，可能會使用 CC 字幕並在互動選擇中跳過 AI，所以延後檢查
     if not args.only_embed and not args.skip_correction and not args.api_key:
-        parser.error("--api-key is required unless using --only-embed or --skip-correction")
+        # 如果不是 YouTube 來源，現在就檢查
+        if not args.youtube:
+            parser.error("--api-key is required unless using --only-embed or --skip-correction")
+        # YouTube 來源會在後續根據使用者選擇決定是否需要 API key
     
     # 檢查必要工具
     missing_tools = []
