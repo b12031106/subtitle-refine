@@ -90,12 +90,11 @@ class VideoSubtitleProcessor:
         os.makedirs(output_dir, exist_ok=True)
         output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
 
-        # 使用 Android 客戶端來繞過 YouTube 的限制（避免 403 錯誤）
-        # 先嘗試下載最佳品質，如果失敗則降級
+        # 下載最高畫質的 mp4 格式（影片+音訊）
+        # 注意：需要保持 yt-dlp 為最新版本以避免 YouTube 403 錯誤
         cmd = [
             "yt-dlp",
-            "-f", "best[ext=mp4]/best",  # 簡化格式選擇，優先選擇 mp4
-            "--extractor-args", "youtube:player_client=android",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "-o", output_template,
             url
         ]
