@@ -10,7 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. 第一步：使用 Gemini AI 校正 Whisper 語音辨識的錯別字、同音字、斷句錯誤
 2. 第二步：在校正後的基礎上進行高品質翻譯
 
-整合了 YouTube 下載、Whisper 語音轉錄、Gemini AI 校正/翻譯、以及 FFmpeg 字幕嵌入功能。核心是單一 Python 腳本 `subtitle_refine.py`（約 1000 行）。
+**🆕 多模態處理（v2.0）**：支援音訊上下文模式 (`--use-audio-context`)，Gemini AI 可同時分析影片音訊和字幕文字，提供更準確的校正。特別適合處理同音字、專有名詞、語氣判斷等場景。
+
+整合了 YouTube 下載、Whisper 語音轉錄、Gemini AI 校正/翻譯、以及 FFmpeg 字幕嵌入功能。核心是單一 Python 腳本 `subtitle_refine.py`（約 1600 行）。
 
 ## 常用指令
 
@@ -44,6 +46,13 @@ python subtitle_refine.py \
   --video "./video.mp4" \
   --api-key "KEY" \
   --skip-correction
+
+# 使用音訊上下文進行多模態處理（更準確）
+python subtitle_refine.py \
+  --video "./video.mp4" \
+  --api-key "KEY" \
+  --use-audio-context \
+  --translate zh-TW
 ```
 
 ### 檢查依賴工具
@@ -110,12 +119,25 @@ python -c "import whisper; print(whisper.__version__)"
 - 僅感嘆句保留驚嘆號（！）
 - 此規則硬編碼在 AI 提示詞中
 
+#### 7. 🆕 音訊上下文多模態處理 (subtitle_refine.py:300-480)
+- **音訊提取** (`extract_audio_from_video`): 使用 FFmpeg 從影片提取 MP3 音訊
+- **音訊切分** (`extract_audio_segment`): 根據 SRT 時間戳切分音訊片段
+- **自動對應** (`_create_audio_segments_for_chunks`): 為每個字幕片段創建對應的音訊片段
+- **多模態處理** (`_process_single_chunk`): 使用 Gemini Files API 上傳音訊，與字幕一起發送給 AI
+- **優勢**：
+  - 更準確的同音字辨識（聽實際發音）
+  - 更好的斷句判斷（利用語音停頓）
+  - 專有名詞處理（結合發音與上下文）
+  - 語氣與標點（根據說話語調）
+
 ### 目錄結構
 
 ```
-downloads/   # YouTube 下載的影片（自動創建）
-subtitles/   # Whisper 轉錄的字幕 + AI 校正後的字幕（自動創建）
-output/      # 最終帶字幕的影片（自動創建）
+downloads/         # YouTube 下載的影片（自動創建）
+subtitles/         # Whisper 轉錄的字幕 + AI 校正後的字幕（自動創建）
+audio/             # 提取的音訊檔案（使用 --use-audio-context 時自動創建）
+audio/segments/    # 音訊片段（使用 --use-audio-context 時自動創建）
+output/            # 最終帶字幕的影片（自動創建）
 ```
 
 ## 支援的語言與模型
@@ -164,3 +186,13 @@ zh/zh-TW (繁中), zh-CN (簡中), en, ja, ko, es, fr, de, it, pt, ru, ar, th, v
 - 自動分段處理避免 token 限制
 - 使用平行處理加速（但受 API rate limit 限制）
 - 最終會重新合併片段並重新編號 SRT 序號
+
+### 🆕 音訊上下文模式
+- **使用時機**：需要更高準確度的場景（專有名詞多、同音字多、語速快）
+- **處理時間**：比純文字模式慢（需要提取和上傳音訊）
+- **API 成本**：音訊輸入可能略高於純文字
+- **注意事項**：
+  - 音訊片段會根據字幕時間戳自動切分
+  - 使用 MP3 格式（128kbps）平衡品質與檔案大小
+  - 音訊檔案會自動上傳到 Gemini Files API
+  - 不支援 `--only-embed` 和 `--skip-correction` 模式
