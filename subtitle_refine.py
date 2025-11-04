@@ -297,10 +297,187 @@ class VideoSubtitleProcessor:
             print(f"❌ 轉錄失敗: {e}")
             raise
     
+    def extract_audio_from_video(self, video_path: str, output_dir: str = "./audio") -> str:
+        """
+        從影片中提取音訊
+
+        Args:
+            video_path: 影片檔案路徑
+            output_dir: 音訊輸出目錄
+
+        Returns:
+            音訊檔案路徑 (.mp3)
+        """
+        print(f"🎵 正在從影片提取音訊...")
+
+        os.makedirs(output_dir, exist_ok=True)
+        video_name = Path(video_path).stem
+        audio_path = os.path.join(output_dir, f"{video_name}.mp3")
+
+        cmd = [
+            FFMPEG_CMD,
+            "-i", video_path,
+            "-vn",  # 不處理影片
+            "-acodec", "libmp3lame",  # 使用 MP3 編碼
+            "-b:a", "128k",  # 音訊位元率
+            "-y",  # 覆蓋現有檔案
+            audio_path
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(f"✅ 音訊提取完成: {audio_path}")
+            return audio_path
+        except subprocess.CalledProcessError as e:
+            print(f"❌ 音訊提取失敗: {e.stderr}")
+            raise
+
+    def extract_audio_segment(
+        self,
+        video_path: str,
+        start_time: str,
+        end_time: str,
+        output_path: str
+    ) -> str:
+        """
+        從影片中提取特定時間範圍的音訊片段
+
+        Args:
+            video_path: 影片檔案路徑
+            start_time: 開始時間 (SRT 格式: HH:MM:SS,mmm)
+            end_time: 結束時間 (SRT 格式: HH:MM:SS,mmm)
+            output_path: 輸出音訊檔案路徑
+
+        Returns:
+            音訊片段檔案路徑
+        """
+        # 將 SRT 時間格式轉換為 FFmpeg 格式 (HH:MM:SS.mmm)
+        start_ffmpeg = start_time.replace(',', '.')
+        end_ffmpeg = end_time.replace(',', '.')
+
+        # 計算持續時間
+        from datetime import datetime, timedelta
+
+        def parse_time(time_str):
+            """解析 HH:MM:SS.mmm 格式的時間"""
+            parts = time_str.split(':')
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds_parts = parts[2].split('.')
+            seconds = int(seconds_parts[0])
+            milliseconds = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
+            return timedelta(hours=hours, minutes=minutes, seconds=seconds, milliseconds=milliseconds)
+
+        start_td = parse_time(start_ffmpeg)
+        end_td = parse_time(end_ffmpeg)
+        duration = end_td - start_td
+
+        # 轉換回字串格式
+        duration_seconds = duration.total_seconds()
+
+        cmd = [
+            FFMPEG_CMD,
+            "-i", video_path,
+            "-ss", start_ffmpeg,  # 開始時間
+            "-t", str(duration_seconds),  # 持續時間（秒）
+            "-vn",  # 不處理影片
+            "-acodec", "libmp3lame",  # 使用 MP3 編碼
+            "-b:a", "128k",  # 音訊位元率
+            "-y",  # 覆蓋現有檔案
+            output_path
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return output_path
+        except subprocess.CalledProcessError as e:
+            print(f"❌ 音訊片段提取失敗 ({start_time} - {end_time}): {e.stderr}")
+            raise
+
     def read_subtitle_file(self, subtitle_path: str) -> str:
         """讀取字幕檔案內容"""
         with open(subtitle_path, 'r', encoding='utf-8') as f:
             return f.read()
+
+    def _parse_srt_chunk_timerange(self, srt_chunk: str) -> tuple:
+        """
+        解析 SRT 字幕片段，取得開始和結束時間
+
+        Args:
+            srt_chunk: SRT 字幕片段內容
+
+        Returns:
+            (start_time, end_time): 開始和結束時間（SRT 格式）
+        """
+        lines = srt_chunk.strip().split('\n')
+
+        # 找到第一個和最後一個時間軸
+        first_timestamp = None
+        last_timestamp = None
+
+        for line in lines:
+            if '-->' in line:
+                parts = line.split('-->')
+                if len(parts) == 2:
+                    if first_timestamp is None:
+                        first_timestamp = parts[0].strip()
+                    last_timestamp = parts[1].strip()
+
+        return (first_timestamp, last_timestamp)
+
+    def _create_audio_segments_for_chunks(
+        self,
+        video_path: str,
+        subtitle_chunks: list,
+        output_dir: str = "./audio/segments"
+    ) -> list:
+        """
+        根據字幕片段創建對應的音訊片段
+
+        Args:
+            video_path: 影片檔案路徑
+            subtitle_chunks: 字幕片段列表
+            output_dir: 音訊片段輸出目錄
+
+        Returns:
+            音訊片段路徑列表（與 subtitle_chunks 順序對應）
+        """
+        print(f"🎵 正在為 {len(subtitle_chunks)} 個字幕片段創建音訊片段...")
+
+        os.makedirs(output_dir, exist_ok=True)
+        audio_segments = []
+
+        for i, chunk in enumerate(subtitle_chunks, 1):
+            # 解析時間範圍
+            start_time, end_time = self._parse_srt_chunk_timerange(chunk)
+
+            if not start_time or not end_time:
+                print(f"  ⚠️  第 {i} 段無法解析時間範圍，跳過音訊提取")
+                audio_segments.append(None)
+                continue
+
+            # 創建音訊片段路徑
+            audio_segment_path = os.path.join(output_dir, f"segment_{i:04d}.mp3")
+
+            print(f"  📄 第 {i}/{len(subtitle_chunks)} 段: {start_time} → {end_time}")
+
+            try:
+                # 提取音訊片段
+                self.extract_audio_segment(
+                    video_path,
+                    start_time,
+                    end_time,
+                    audio_segment_path
+                )
+                audio_segments.append(audio_segment_path)
+            except Exception as e:
+                print(f"  ⚠️  第 {i} 段音訊提取失敗: {e}")
+                audio_segments.append(None)
+
+        successful_count = sum(1 for seg in audio_segments if seg is not None)
+        print(f"✅ 成功創建 {successful_count}/{len(subtitle_chunks)} 個音訊片段")
+
+        return audio_segments
 
     def _split_subtitle_into_chunks(self, subtitle_content: str, max_chars: int = 15000) -> list:
         """
@@ -453,17 +630,22 @@ class VideoSubtitleProcessor:
         base_prompt_template: str,
         target_language: Optional[str] = None,
         retry_count: int = 0,
-        max_retries: int = 2
+        max_retries: int = 2,
+        audio_path: Optional[str] = None
     ) -> tuple:
         """
-        處理單個字幕片段（支援自動重試）
+        處理單個字幕片段（支援自動重試和音訊輸入）
+
+        Args:
+            audio_path: 音訊片段路徑（可選，用於多模態處理）
 
         Returns:
             (chunk_index, processed_chunk): 索引和處理後的內容
         """
         if total_chunks > 1:
             retry_suffix = f" (重試 {retry_count}/{max_retries})" if retry_count > 0 else ""
-            print(f"  📄 處理第 {chunk_index}/{total_chunks} 段{retry_suffix}...")
+            audio_suffix = " [含音訊]" if audio_path else ""
+            print(f"  📄 處理第 {chunk_index}/{total_chunks} 段{retry_suffix}{audio_suffix}...")
 
         chunk_prompt = base_prompt_template + f"字幕內容：\n\n{chunk}"
 
@@ -472,14 +654,36 @@ class VideoSubtitleProcessor:
         prompt_chars = len(chunk_prompt)
         print(f"     📊 字幕片段大小: {chunk_chars:,} 字元")
         print(f"     📊 完整提示詞大小: {prompt_chars:,} 字元")
+        if audio_path:
+            import os
+            audio_size = os.path.getsize(audio_path)
+            print(f"     🎵 音訊檔案大小: {audio_size:,} bytes ({audio_size / 1024 / 1024:.2f} MB)")
 
         try:
             print(f"  ⏳ 正在呼叫 Gemini API...")
 
+            # 準備內容
+            if audio_path:
+                # 使用多模態模式：上傳音訊並與文字一起發送
+                print(f"     📤 正在上傳音訊檔案...")
+
+                # 上傳音訊檔案
+                audio_file = self.client.files.upload(path=audio_path)
+                print(f"     ✅ 音訊已上傳: {audio_file.name}")
+
+                # 創建多模態內容：音訊 + 文字提示
+                contents = [
+                    audio_file,
+                    chunk_prompt
+                ]
+            else:
+                # 純文字模式
+                contents = chunk_prompt
+
             # 使用新版 SDK，並增加最大輸出 token 數
             response = self.client.models.generate_content(
                 model=self.gemini_model,
-                contents=chunk_prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     max_output_tokens=65536,
                     temperature=0.3,
@@ -517,14 +721,14 @@ class VideoSubtitleProcessor:
 
                             print(f"     ✂️  分割為兩個子片段: {len(chunk1):,} 和 {len(chunk2):,} 字元")
 
-                            # 遞迴處理兩個子片段
+                            # 遞迴處理兩個子片段（注意：分割後不再使用音訊）
                             _, processed1 = self._process_single_chunk(
                                 chunk1, chunk_index, total_chunks, base_prompt_template,
-                                target_language, retry_count + 1, max_retries
+                                target_language, retry_count + 1, max_retries, None
                             )
                             _, processed2 = self._process_single_chunk(
                                 chunk2, chunk_index, total_chunks, base_prompt_template,
-                                target_language, retry_count + 1, max_retries
+                                target_language, retry_count + 1, max_retries, None
                             )
 
                             # 合併兩個結果
@@ -590,7 +794,9 @@ class VideoSubtitleProcessor:
         custom_prompt: Optional[str] = None,
         context: Optional[str] = None,
         target_language: Optional[str] = None,
-        max_chars: int = 15000
+        max_chars: int = 15000,
+        use_audio_context: bool = False,
+        video_path: Optional[str] = None
     ) -> str:
         """
         使用 Gemini LLM 校正字幕（並可選擇翻譯）
@@ -601,18 +807,30 @@ class VideoSubtitleProcessor:
             context: 額外的上下文資訊
             target_language: 目標翻譯語言（如果需要翻譯）
             max_chars: 每個片段的最大字元數（預設 15000，平衡處理速度與 token 限制）
+            use_audio_context: 是否使用音訊上下文進行多模態處理
+            video_path: 影片檔案路徑（當 use_audio_context=True 時必須提供）
 
         Returns:
             校正後（或翻譯後）的字幕內容
         """
-        if target_language:
-            print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 校正並翻譯字幕為 {target_language}...")
+        if use_audio_context:
+            if target_language:
+                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 以多模態方式（音訊+文字）校正並翻譯字幕為 {target_language}...")
+            else:
+                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 以多模態方式（音訊+文字）校正字幕...")
         else:
-            print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 校正字幕...")
+            if target_language:
+                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 校正並翻譯字幕為 {target_language}...")
+            else:
+                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 校正字幕...")
 
         # 檢查是否有 client
         if not self.client:
             raise ValueError("需要 Gemini API key 才能使用 AI 校正/翻譯功能")
+
+        # 檢查音訊上下文參數
+        if use_audio_context and not video_path:
+            raise ValueError("使用音訊上下文時必須提供 video_path 參數")
 
         # 分割字幕為多個片段（基於字元數）
         chunks = self._split_subtitle_into_chunks(subtitle_content, max_chars=max_chars)
@@ -710,6 +928,18 @@ class VideoSubtitleProcessor:
         if custom_prompt:
             base_prompt_template += f"{custom_prompt}\n\n"
 
+        # 如果使用音訊上下文，添加相應的提示詞說明
+        if use_audio_context:
+            base_prompt_template = "你將收到音訊檔案和對應的字幕文字。請仔細聆聽音訊，並根據實際發音來校正字幕中的錯誤。\n\n" + base_prompt_template
+
+        # 創建音訊片段（如果需要）
+        audio_segments = []
+        if use_audio_context:
+            audio_segments = self._create_audio_segments_for_chunks(
+                video_path,
+                chunks
+            )
+
         # 取得 rate limit
         rpm, tpm = self._get_rate_limit_for_model(self.gemini_model)
 
@@ -733,13 +963,21 @@ class VideoSubtitleProcessor:
                 if i > 1 and delay_between_requests > 0:
                     time.sleep(delay_between_requests)
 
+                # 取得對應的音訊片段（如果有）
+                audio_path = None
+                if use_audio_context and audio_segments and i <= len(audio_segments):
+                    audio_path = audio_segments[i - 1]  # audio_segments 是 0-indexed
+
                 future = executor.submit(
                     self._process_single_chunk,
                     chunk,
                     i,
                     total_chunks,
                     base_prompt_template,
-                    target_language
+                    target_language,
+                    0,  # retry_count
+                    2,  # max_retries
+                    audio_path  # 音訊路徑
                 )
                 futures[future] = i
 
@@ -957,11 +1195,12 @@ class VideoSubtitleProcessor:
         existing_subtitle: Optional[str] = None,
         skip_download: bool = False,
         skip_transcribe: bool = False,
-        only_embed: bool = False
+        only_embed: bool = False,
+        use_audio_context: bool = False
     ) -> str:
         """
         完整處理流程
-        
+
         Args:
             input_source: YouTube URL 或本地影片路徑
             is_youtube: 是否為 YouTube 連結
@@ -973,7 +1212,8 @@ class VideoSubtitleProcessor:
             skip_download: 跳過下載步驟（僅當提供本地影片路徑時）
             skip_transcribe: 跳過轉錄步驟（需要提供 existing_subtitle）
             only_embed: 只執行字幕嵌入（需要提供影片和字幕，跳過所有其他步驟）
-            
+            use_audio_context: 是否使用音訊上下文進行多模態處理
+
         Returns:
             最終帶字幕的影片路徑
         """
@@ -1173,7 +1413,9 @@ class VideoSubtitleProcessor:
                 subtitle_content,
                 custom_prompt=custom_prompt,
                 context=context,
-                target_language=target_language
+                target_language=target_language,
+                use_audio_context=use_audio_context,
+                video_path=video_path if use_audio_context else None
             )
             subtitle_path = self.save_corrected_subtitle(
                 corrected_content,
@@ -1208,6 +1450,9 @@ def main():
 
   # 完整流程：處理本地英文影片並翻譯成繁體中文
   python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --source-lang en --translate zh-TW
+
+  # 使用音訊上下文進行多模態處理（更準確的校正）
+  python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --use-audio-context --translate zh-TW
 
   # 跳過下載和轉錄：僅校正/翻譯現有字幕並嵌入影片
   python subtitle_refine.py --video "./video.mp4" --subtitle "./video.srt" --api-key "KEY" --translate en
@@ -1270,6 +1515,11 @@ def main():
     parser.add_argument("--prompt", "-p", help="自定義 AI 校正提示詞")
     parser.add_argument("--context", "-c", help="額外的上下文資訊")
     parser.add_argument("--skip-correction", "-s", action="store_true", help="跳過 AI 字幕校正")
+    parser.add_argument(
+        "--use-audio-context", "-uac",
+        action="store_true",
+        help="使用音訊上下文進行多模態處理（Gemini 會同時分析音訊和字幕，提供更準確的校正）"
+    )
     
     # 跳過步驟的選項
     parser.add_argument(
@@ -1291,6 +1541,13 @@ def main():
             parser.error("--only-embed mode requires both --video and --subtitle")
         if args.youtube:
             parser.error("--only-embed mode cannot be used with --youtube")
+
+    # 檢查 use-audio-context 的參數衝突
+    if args.use_audio_context:
+        if args.only_embed:
+            parser.error("--use-audio-context cannot be used with --only-embed (no AI processing in only-embed mode)")
+        if args.skip_correction:
+            parser.error("--use-audio-context cannot be used with --skip-correction (audio context is only used for AI correction)")
     
     # 檢查 API key（僅在需要 AI 處理時）
     # 注意：對於 YouTube 來源，可能會使用 CC 字幕並在互動選擇中跳過 AI，所以延後檢查
@@ -1363,7 +1620,8 @@ def main():
             existing_subtitle=args.subtitle,
             skip_download=args.subtitle is not None and not is_youtube,
             skip_transcribe=args.subtitle is not None,
-            only_embed=args.only_embed
+            only_embed=args.only_embed,
+            use_audio_context=args.use_audio_context
         )
         
     except Exception as e:
