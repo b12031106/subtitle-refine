@@ -697,10 +697,16 @@ class VideoSubtitleProcessor:
 
             if self.provider == "openai":
                 print(f"  ⏳ 正在呼叫 OpenAI API ({self.openai_model})...")
+                # 各模型 max output tokens 上限
+                _openai_max_tokens = {
+                    "gpt-4o": 16384, "gpt-4o-mini": 16384,
+                    "gpt-4.1": 32768, "gpt-4.1-mini": 32768,
+                    "o3": 100000, "o4-mini": 65536,
+                }.get(self.openai_model, 16384)
                 response = self.openai_client.chat.completions.create(
                     model=self.openai_model,
                     messages=[{"role": "user", "content": chunk_prompt}],
-                    max_tokens=65536,
+                    max_tokens=_openai_max_tokens,
                     temperature=0.3,
                 )
                 finish_reason = response.choices[0].finish_reason
@@ -1384,16 +1390,17 @@ class VideoSubtitleProcessor:
                         use_cc_subtitle = True
                         print("✅ 已下載 YouTube 字幕，將跳過 Whisper 轉錄步驟")
 
-                        # 詢問是否需要 Gemini 處理
+                        # 詢問是否需要 AI 處理
+                        _ai_label = "OpenAI" if self.provider == "openai" else "Gemini AI"
                         print("\n" + "-" * 60)
-                        print("🤔 是否需要使用 Gemini AI 處理這個字幕？")
+                        print(f"🤔 是否需要使用 {_ai_label} 處理這個字幕？")
                         print("-" * 60)
 
                         if target_language:
                             print(f"✨ 您設定了翻譯目標語言：{target_language}")
                             print("\n選項：")
-                            print("  [1] 使用 Gemini 校正 + 翻譯（推薦，確保翻譯品質）")
-                            print("  [2] 僅使用 Gemini 翻譯（跳過校正）")
+                            print(f"  [1] 使用 {_ai_label} 校正 + 翻譯（推薦，確保翻譯品質）")
+                            print(f"  [2] 僅使用 {_ai_label} 翻譯（跳過校正）")
                             print("  [3] 都不使用（直接使用原始字幕，不翻譯）")
 
                             while True:
@@ -1411,10 +1418,10 @@ class VideoSubtitleProcessor:
                                     sys.exit(0)
 
                             if ai_choice_num == 1:
-                                print("\n✅ 將使用 Gemini 校正 + 翻譯")
+                                print(f"\n✅ 將使用 {_ai_label} 校正 + 翻譯")
                                 skip_correction_for_cc = False
                             elif ai_choice_num == 2:
-                                print("\n✅ 將僅使用 Gemini 翻譯")
+                                print(f"\n✅ 將僅使用 {_ai_label} 翻譯")
                                 skip_correction_for_cc = False
                                 # 這裡保持 skip_correction_for_cc = False，但我們會在後面只做翻譯
                             else:
@@ -1422,7 +1429,7 @@ class VideoSubtitleProcessor:
                                 skip_correction_for_cc = True
                         else:
                             print("\n選項：")
-                            print("  [1] 使用 Gemini 校正字幕（修正錯誤、優化斷句）")
+                            print(f"  [1] 使用 {_ai_label} 校正字幕（修正錯誤、優化斷句）")
                             print("  [2] 直接使用原始字幕（不校正）")
 
                             while True:
@@ -1440,7 +1447,7 @@ class VideoSubtitleProcessor:
                                     sys.exit(0)
 
                             if ai_choice_num == 1:
-                                print("\n✅ 將使用 Gemini 校正字幕")
+                                print(f"\n✅ 將使用 {_ai_label} 校正字幕")
                                 skip_correction_for_cc = False
                             else:
                                 print("\n✅ 將直接使用原始字幕")
@@ -1505,11 +1512,13 @@ class VideoSubtitleProcessor:
         should_skip_correction = skip_correction or skip_correction_for_cc
 
         if not should_skip_correction:
-            # 在實際需要使用 Gemini 時，檢查是否有 API key
-            if not self.client:
+            # 在實際需要使用 AI 時，檢查對應 provider 的 client 是否存在
+            _has_client = (self.provider == "openai" and self.openai_client) or (self.provider != "openai" and self.client)
+            if not _has_client:
+                _key_hint = "OPENAI_API_KEY / --openai-api-key" if self.provider == "openai" else "GEMINI_API_KEY / --api-key"
                 raise ValueError(
-                    "需要 Gemini API key 才能使用 AI 校正/翻譯功能。\n"
-                    "請使用 --api-key 參數提供 API key，或使用 --skip-correction 跳過 AI 處理。"
+                    f"需要 {self.provider.upper()} API key 才能使用 AI 校正/翻譯功能。\n"
+                    f"請設定環境變數 {_key_hint}，或使用 --skip-correction 跳過 AI 處理。"
                 )
 
             subtitle_content = self.read_subtitle_file(subtitle_path)
