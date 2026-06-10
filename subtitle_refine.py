@@ -11,6 +11,17 @@ import time
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(**kwargs): pass
+
+try:
+    from openai import OpenAI as _OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
 # 設定 FFmpeg 路徑（使用 static-ffmpeg）
 FFMPEG_CMD = "ffmpeg"  # 預設值
 FFMPEG_AVAILABLE = False
@@ -52,7 +63,10 @@ class VideoSubtitleProcessor:
         gemini_api_key: Optional[str] = None,
         whisper_model: str = "base",
         source_language: str = "zh",
-        gemini_model: str = "gemini-2.5-flash"
+        gemini_model: str = "gemini-2.5-flash",
+        provider: str = "gemini",
+        openai_api_key: Optional[str] = None,
+        openai_model: str = "gpt-4o"
     ):
         """
         初始化影片字幕處理器
@@ -62,17 +76,28 @@ class VideoSubtitleProcessor:
             whisper_model: Whisper 模型大小 (tiny, base, small, medium, large)
             source_language: 影片語言代碼 (zh, en, ja, ko, es, fr 等，或 auto 自動偵測)
             gemini_model: Gemini 模型名稱
+            provider: AI 提供商 (gemini 或 openai)
+            openai_api_key: OpenAI API 金鑰
+            openai_model: OpenAI 模型名稱
         """
         self.whisper_model = whisper_model
         self.source_language = source_language
+        self.provider = provider
         self.gemini_model = gemini_model
+        self.openai_model = openai_model
+        self.client = None
+        self.openai_client = None
 
-        # 只在有 API key 時才初始化 Gemini client
-        if gemini_api_key:
-            os.environ['GEMINI_API_KEY'] = gemini_api_key
-            self.client = genai.Client(api_key=gemini_api_key)
+        if provider == "openai":
+            if not OPENAI_AVAILABLE:
+                raise ImportError("請安裝 openai 套件: pip install openai")
+            if openai_api_key:
+                self.openai_client = _OpenAI(api_key=openai_api_key)
         else:
-            self.client = None
+            # 只在有 API key 時才初始化 Gemini client
+            if gemini_api_key:
+                os.environ['GEMINI_API_KEY'] = gemini_api_key
+                self.client = genai.Client(api_key=gemini_api_key)
         
     def download_youtube_video(self, url: str, output_dir: str = "./downloads") -> str:
         """
@@ -615,12 +640,20 @@ class VideoSubtitleProcessor:
             (rpm, tpm): requests per minute, tokens per minute
         """
         rate_limits = {
+            # Gemini 模型
             "gemini-2.5-flash": (10, 250000),
             "gemini-2.5-pro": (5, 125000),
             "gemini-2.5-flash-lite": (15, 250000),
             "gemini-2.0-flash": (10, 250000),
+            # OpenAI 模型
+            "gpt-4o": (10, 128000),
+            "gpt-4o-mini": (15, 128000),
+            "gpt-4.1": (10, 128000),
+            "gpt-4.1-mini": (15, 128000),
+            "o3": (5, 100000),
+            "o4-mini": (10, 128000),
         }
-        return rate_limits.get(model_name, (10, 250000))  # 預設使用 flash 的限制
+        return rate_limits.get(model_name, (10, 128000))  # 預設使用保守限制
 
     def _process_single_chunk(
         self,
@@ -660,68 +693,29 @@ class VideoSubtitleProcessor:
             print(f"     🎵 音訊檔案大小: {audio_size:,} bytes ({audio_size / 1024 / 1024:.2f} MB)")
 
         try:
-            print(f"  ⏳ 正在呼叫 Gemini API...")
+            result_text = None
 
-            # 準備內容
-            if audio_path:
-                # 使用多模態模式：上傳音訊並與文字一起發送
-                print(f"     📤 正在上傳音訊檔案...")
-
-                # 上傳音訊檔案
-                audio_file = self.client.files.upload(path=audio_path)
-                print(f"     ✅ 音訊已上傳: {audio_file.name}")
-
-                # 創建多模態內容：音訊 + 文字提示
-                contents = [
-                    audio_file,
-                    chunk_prompt
-                ]
-            else:
-                # 純文字模式
-                contents = chunk_prompt
-
-            # 使用新版 SDK，並增加最大輸出 token 數
-            response = self.client.models.generate_content(
-                model=self.gemini_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=65536,
+            if self.provider == "openai":
+                print(f"  ⏳ 正在呼叫 OpenAI API ({self.openai_model})...")
+                response = self.openai_client.chat.completions.create(
+                    model=self.openai_model,
+                    messages=[{"role": "user", "content": chunk_prompt}],
+                    max_tokens=65536,
                     temperature=0.3,
                 )
-            )
-
-            # 檢查 finish_reason 和顯示 token 使用情況
-            print(f"  🔍 檢查 API 回應...")
-            if hasattr(response, 'candidates') and response.candidates:
-                finish_reason = response.candidates[0].finish_reason if hasattr(response.candidates[0], 'finish_reason') else None
+                finish_reason = response.choices[0].finish_reason
+                print(f"  🔍 檢查 API 回應...")
                 print(f"     - finish_reason: {finish_reason}")
 
-                if finish_reason and 'MAX_TOKENS' in str(finish_reason):
-                    # 顯示詳細的 token 使用情況
-                    if hasattr(response, 'usage_metadata'):
-                        usage = response.usage_metadata
-                        print(f"     ⚠️  超過 token 限制詳情:")
-                        if hasattr(usage, 'thoughts_token_count'):
-                            print(f"        - 思考 tokens: {usage.thoughts_token_count:,}")
-                        if hasattr(usage, 'candidates_token_count'):
-                            print(f"        - 輸出 tokens: {usage.candidates_token_count:,}")
-                        if hasattr(usage, 'total_token_count'):
-                            print(f"        - 總計: {usage.total_token_count:,} / 65,536")
-
-                    # 如果還有重試次數，將此片段切成兩半重試
+                if finish_reason == "length":
                     if retry_count < max_retries:
                         print(f"     🔄 將此片段切成兩半後重試...")
-                        # 將此 chunk 切成兩半
                         entries = re.split(r'\n\n+', chunk.strip())
                         mid = len(entries) // 2
-
                         if mid > 0:
                             chunk1 = '\n\n'.join(entries[:mid])
                             chunk2 = '\n\n'.join(entries[mid:])
-
                             print(f"     ✂️  分割為兩個子片段: {len(chunk1):,} 和 {len(chunk2):,} 字元")
-
-                            # 遞迴處理兩個子片段（注意：分割後不再使用音訊）
                             _, processed1 = self._process_single_chunk(
                                 chunk1, chunk_index, total_chunks, base_prompt_template,
                                 target_language, retry_count + 1, max_retries, None
@@ -730,48 +724,109 @@ class VideoSubtitleProcessor:
                                 chunk2, chunk_index, total_chunks, base_prompt_template,
                                 target_language, retry_count + 1, max_retries, None
                             )
-
-                            # 合併兩個結果
-                            combined = processed1 + '\n\n' + processed2
-                            return (chunk_index, combined)
-
-                    # 無法重試，拋出錯誤
+                            return (chunk_index, processed1 + '\n\n' + processed2)
                     error_msg = f"❌ 輸出超過 token 限制！\n"
                     error_msg += f"     - 此片段字元數: {chunk_chars:,}\n"
                     error_msg += f"     - 建議：減少 max_chars 參數（目前可能需要設為 {chunk_chars // 2:,} 以下）\n"
-                    if hasattr(response, 'usage_metadata'):
-                        error_msg += f"     - Token 使用情況: {response.usage_metadata}\n"
                     raise ValueError(error_msg)
 
-            # 顯示 token 使用統計
-            if hasattr(response, 'usage_metadata'):
-                usage = response.usage_metadata
-                print(f"     📈 Token 使用統計:")
-                if hasattr(usage, 'prompt_token_count'):
-                    print(f"        - 輸入 tokens: {usage.prompt_token_count:,}")
-                if hasattr(usage, 'candidates_token_count'):
-                    print(f"        - 輸出 tokens: {usage.candidates_token_count:,}")
-                if hasattr(usage, 'thoughts_token_count') and usage.thoughts_token_count:
-                    print(f"        - 思考 tokens: {usage.thoughts_token_count:,}")
-                if hasattr(usage, 'total_token_count'):
-                    print(f"        - 總計 tokens: {usage.total_token_count:,}")
+                if response.usage:
+                    usage = response.usage
+                    print(f"     📈 Token 使用統計:")
+                    print(f"        - 輸入 tokens: {usage.prompt_tokens:,}")
+                    print(f"        - 輸出 tokens: {usage.completion_tokens:,}")
+                    print(f"        - 總計 tokens: {usage.total_tokens:,}")
 
-                # 計算字元與 token 的比率
-                if hasattr(usage, 'prompt_token_count') and prompt_chars > 0:
-                    char_per_token = prompt_chars / usage.prompt_token_count
-                    print(f"        - 字元/Token 比率: {char_per_token:.2f}")
+                result_text = response.choices[0].message.content
+
+            else:
+                print(f"  ⏳ 正在呼叫 Gemini API ({self.gemini_model})...")
+
+                # 準備內容
+                if audio_path:
+                    # 使用多模態模式：上傳音訊並與文字一起發送
+                    print(f"     📤 正在上傳音訊檔案...")
+                    audio_file = self.client.files.upload(file=audio_path)
+                    print(f"     ✅ 音訊已上傳: {audio_file.name}")
+                    contents = [audio_file, chunk_prompt]
+                else:
+                    contents = chunk_prompt
+
+                response = self.client.models.generate_content(
+                    model=self.gemini_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=65536,
+                        temperature=0.3,
+                    )
+                )
+
+                print(f"  🔍 檢查 API 回應...")
+                if hasattr(response, 'candidates') and response.candidates:
+                    finish_reason = response.candidates[0].finish_reason if hasattr(response.candidates[0], 'finish_reason') else None
+                    print(f"     - finish_reason: {finish_reason}")
+
+                    if finish_reason and 'MAX_TOKENS' in str(finish_reason):
+                        if hasattr(response, 'usage_metadata'):
+                            usage = response.usage_metadata
+                            print(f"     ⚠️  超過 token 限制詳情:")
+                            if hasattr(usage, 'thoughts_token_count'):
+                                print(f"        - 思考 tokens: {usage.thoughts_token_count:,}")
+                            if hasattr(usage, 'candidates_token_count'):
+                                print(f"        - 輸出 tokens: {usage.candidates_token_count:,}")
+                            if hasattr(usage, 'total_token_count'):
+                                print(f"        - 總計: {usage.total_token_count:,} / 65,536")
+
+                        if retry_count < max_retries:
+                            print(f"     🔄 將此片段切成兩半後重試...")
+                            entries = re.split(r'\n\n+', chunk.strip())
+                            mid = len(entries) // 2
+                            if mid > 0:
+                                chunk1 = '\n\n'.join(entries[:mid])
+                                chunk2 = '\n\n'.join(entries[mid:])
+                                print(f"     ✂️  分割為兩個子片段: {len(chunk1):,} 和 {len(chunk2):,} 字元")
+                                _, processed1 = self._process_single_chunk(
+                                    chunk1, chunk_index, total_chunks, base_prompt_template,
+                                    target_language, retry_count + 1, max_retries, None
+                                )
+                                _, processed2 = self._process_single_chunk(
+                                    chunk2, chunk_index, total_chunks, base_prompt_template,
+                                    target_language, retry_count + 1, max_retries, None
+                                )
+                                return (chunk_index, processed1 + '\n\n' + processed2)
+
+                        error_msg = f"❌ 輸出超過 token 限制！\n"
+                        error_msg += f"     - 此片段字元數: {chunk_chars:,}\n"
+                        error_msg += f"     - 建議：減少 max_chars 參數（目前可能需要設為 {chunk_chars // 2:,} 以下）\n"
+                        if hasattr(response, 'usage_metadata'):
+                            error_msg += f"     - Token 使用情況: {response.usage_metadata}\n"
+                        raise ValueError(error_msg)
+
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    print(f"     📈 Token 使用統計:")
+                    if hasattr(usage, 'prompt_token_count'):
+                        print(f"        - 輸入 tokens: {usage.prompt_token_count:,}")
+                    if hasattr(usage, 'candidates_token_count'):
+                        print(f"        - 輸出 tokens: {usage.candidates_token_count:,}")
+                    if hasattr(usage, 'thoughts_token_count') and usage.thoughts_token_count:
+                        print(f"        - 思考 tokens: {usage.thoughts_token_count:,}")
+                    if hasattr(usage, 'total_token_count'):
+                        print(f"        - 總計 tokens: {usage.total_token_count:,}")
+                    if hasattr(usage, 'prompt_token_count') and prompt_chars > 0:
+                        char_per_token = prompt_chars / usage.prompt_token_count
+                        print(f"        - 字元/Token 比率: {char_per_token:.2f}")
+
+                result_text = response.text
 
             # 檢查回應是否有效
-            if not response.text:
-                error_msg = f"API 回應為空\n"
-                if hasattr(response, '__dict__'):
-                    error_msg += f"     response 屬性: {response.__dict__}"
-                raise ValueError(error_msg)
+            if not result_text:
+                raise ValueError("API 回應為空")
 
-            print(f"  ✅ 成功接收到回應 (長度: {len(response.text):,} 字元)")
+            print(f"  ✅ 成功接收到回應 (長度: {len(result_text):,} 字元)")
 
             # 清理回應
-            cleaned_chunk = self._clean_llm_response(response.text)
+            cleaned_chunk = self._clean_llm_response(result_text)
 
             # 驗證並修正 SRT 格式
             cleaned_chunk = self._validate_and_fix_srt(cleaned_chunk)
@@ -782,11 +837,42 @@ class VideoSubtitleProcessor:
             return (chunk_index, cleaned_chunk)
 
         except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
+
+            # 檢查是否為可重試的錯誤（503, 429, 500 等）
+            is_retryable = False
+            if 'ServerError' in error_type or '503' in error_msg or 'UNAVAILABLE' in error_msg:
+                is_retryable = True
+            elif '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'RateLimitError' in error_type:
+                is_retryable = True
+            elif '500' in error_msg or 'INTERNAL' in error_msg or 'APIStatusError' in error_type:
+                is_retryable = True
+
+            # 如果是可重試的錯誤且還有重試次數
+            if is_retryable and retry_count < max_retries:
+                wait_time = (2 ** retry_count) * 5  # 指數退避：5秒, 10秒, 20秒...
+                print(f"  ⚠️  第 {chunk_index}/{total_chunks} 段遇到暫時性錯誤")
+                print(f"     錯誤類型: {error_type}")
+                print(f"     錯誤訊息: {error_msg}")
+                print(f"     🔄 將在 {wait_time} 秒後重試 ({retry_count + 1}/{max_retries})...")
+
+                time.sleep(wait_time)
+
+                # 遞迴重試
+                return self._process_single_chunk(
+                    chunk, chunk_index, total_chunks, base_prompt_template,
+                    target_language, retry_count + 1, max_retries, audio_path
+                )
+
+            # 不可重試或已達最大重試次數
             print(f"  ❌ 第 {chunk_index}/{total_chunks} 段處理失敗")
-            print(f"     錯誤類型: {type(e).__name__}")
-            print(f"     錯誤訊息: {str(e)}")
+            print(f"     錯誤類型: {error_type}")
+            print(f"     錯誤訊息: {error_msg}")
+            if is_retryable:
+                print(f"     ⚠️  已達最大重試次數 ({max_retries})")
             print(f"\n  🛑 由於處理失敗，中斷整個{'翻譯' if target_language else '校正'}流程")
-            raise Exception(f"第 {chunk_index}/{total_chunks} 段處理失敗: {str(e)}")
+            raise Exception(f"第 {chunk_index}/{total_chunks} 段處理失敗: {error_msg}")
 
     def correct_subtitle_with_llm(
         self,
@@ -813,20 +899,33 @@ class VideoSubtitleProcessor:
         Returns:
             校正後（或翻譯後）的字幕內容
         """
+        if self.provider == "openai":
+            model_label = self.openai_model
+            provider_label = "OpenAI"
+        else:
+            model_label = self.gemini_model
+            provider_label = "Gemini AI"
+
         if use_audio_context:
             if target_language:
-                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 以多模態方式（音訊+文字）校正並翻譯字幕為 {target_language}...")
+                print(f"🤖 正在使用 {provider_label} ({model_label}) 以多模態方式（音訊+文字）校正並翻譯字幕為 {target_language}...")
             else:
-                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 以多模態方式（音訊+文字）校正字幕...")
+                print(f"🤖 正在使用 {provider_label} ({model_label}) 以多模態方式（音訊+文字）校正字幕...")
         else:
             if target_language:
-                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 校正並翻譯字幕為 {target_language}...")
+                print(f"🤖 正在使用 {provider_label} ({model_label}) 校正並翻譯字幕為 {target_language}...")
             else:
-                print(f"🤖 正在使用 Gemini AI ({self.gemini_model}) 校正字幕...")
+                print(f"🤖 正在使用 {provider_label} ({model_label}) 校正字幕...")
 
-        # 檢查是否有 client
-        if not self.client:
-            raise ValueError("需要 Gemini API key 才能使用 AI 校正/翻譯功能")
+        # 檢查是否有可用的 client
+        if self.provider == "openai":
+            if not self.openai_client:
+                raise ValueError("需要 OpenAI API key 才能使用 AI 校正/翻譯功能")
+            if use_audio_context:
+                raise ValueError("--use-audio-context 僅支援 Gemini，不支援 OpenAI")
+        else:
+            if not self.client:
+                raise ValueError("需要 Gemini API key 才能使用 AI 校正/翻譯功能")
 
         # 檢查音訊上下文參數
         if use_audio_context and not video_path:
@@ -940,8 +1039,9 @@ class VideoSubtitleProcessor:
                 chunks
             )
 
-        # 取得 rate limit
-        rpm, tpm = self._get_rate_limit_for_model(self.gemini_model)
+        # 取得 rate limit（依照 provider 選用對應模型）
+        active_model = self.openai_model if self.provider == "openai" else self.gemini_model
+        rpm, tpm = self._get_rate_limit_for_model(active_model)
 
         # 計算每個請求之間需要等待的時間（秒）
         delay_between_requests = 60.0 / rpm if total_chunks > 1 else 0
@@ -952,7 +1052,11 @@ class VideoSubtitleProcessor:
                 print(f"   每個請求間隔: {delay_between_requests:.1f} 秒")
 
         # 使用 ThreadPoolExecutor 平行處理，但限制同時執行的數量
-        max_workers = min(total_chunks, rpm)  # 不超過 RPM 限制
+        # 音訊上下文模式時降低併發數，因為需要上傳檔案
+        if use_audio_context:
+            max_workers = min(total_chunks, max(1, rpm // 2))  # 降低一半併發數
+        else:
+            max_workers = min(total_chunks, rpm)  # 不超過 RPM 限制
         processed_chunks_dict = {}
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1440,28 +1544,41 @@ class VideoSubtitleProcessor:
 
 
 def main():
+    # 載入 .env 環境變數（CLI 參數優先，不覆寫已有的 env）
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
-        description="自動化影片字幕處理工具 - 支援 YouTube 下載、Whisper 轉錄、Gemini AI 校正/翻譯、FFmpeg 嵌入字幕",
+        description="自動化影片字幕處理工具 - 支援 YouTube 下載、Whisper 轉錄、AI 校正/翻譯、FFmpeg 嵌入字幕",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用範例:
-  # 完整流程：處理 YouTube 影片
-  python subtitle_refine.py --youtube "https://www.youtube.com/watch?v=xxxxx" --api-key "YOUR_GEMINI_API_KEY"
+  # 完整流程：處理 YouTube 影片（API key 從 .env 讀取）
+  python subtitle_refine.py --youtube "https://www.youtube.com/watch?v=xxxxx"
 
   # 完整流程：處理本地英文影片並翻譯成繁體中文
-  python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --source-lang en --translate zh-TW
+  python subtitle_refine.py --video "./video.mp4" --api-key "GEMINI_KEY" --source-lang en --translate zh-TW
 
-  # 使用音訊上下文進行多模態處理（更準確的校正）
-  python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --use-audio-context --translate zh-TW
+  # 使用 OpenAI 處理
+  python subtitle_refine.py --video "./video.mp4" --provider openai --openai-api-key "sk-..." --translate zh-TW
+
+  # 使用音訊上下文進行多模態處理（僅支援 Gemini）
+  python subtitle_refine.py --video "./video.mp4" --use-audio-context --translate zh-TW
 
   # 跳過下載和轉錄：僅校正/翻譯現有字幕並嵌入影片
-  python subtitle_refine.py --video "./video.mp4" --subtitle "./video.srt" --api-key "KEY" --translate en
+  python subtitle_refine.py --video "./video.mp4" --subtitle "./video.srt" --translate en
 
   # 純字幕嵌入：直接將已處理好的字幕嵌入影片（不使用 AI）
   python subtitle_refine.py --video "./video.mp4" --subtitle "./video_translated.srt" --only-embed
 
   # 使用自定義 Gemini 模型
-  python subtitle_refine.py --video "./video.mp4" --api-key "KEY" --gemini-model "gemini-2.5-pro"
+  python subtitle_refine.py --video "./video.mp4" --gemini-model "gemini-2.5-pro"
+
+  # 使用自定義 OpenAI 模型
+  python subtitle_refine.py --video "./video.mp4" --provider openai --openai-model "gpt-4o-mini"
+
+環境變數（可寫入 .env 檔案，避免每次傳入 API key）:
+  GEMINI_API_KEY=your_gemini_api_key
+  OPENAI_API_KEY=your_openai_api_key
 
 支援的語言代碼:
   zh/zh-TW (繁體中文), zh-CN (簡體中文), en (英文), ja (日文), ko (韓文)
@@ -1473,36 +1590,56 @@ def main():
   gemini-2.5-flash-lite (最快，成本最低)
   gemini-2.5-pro (最強大，思考能力最好)
   gemini-2.0-flash (第二代，長上下文)
+
+可用的 OpenAI 模型:
+  gpt-4o (推薦，性價比最高)
+  gpt-4o-mini (最快，成本最低)
+  gpt-4.1 (最新旗艦)
+  o3 / o4-mini (推理模型)
         """
     )
-    
+
     # 輸入來源
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--youtube", "-y", help="YouTube 影片網址")
     input_group.add_argument("--video", "-v", help="本地影片檔案路徑")
-    
-    # API 設定
-    parser.add_argument("--api-key", "-k", help="Gemini API 金鑰（使用 --only-embed 時不需要）")
-    
-    # 模型設定
+
+    # AI Provider 設定
+    parser.add_argument(
+        "--provider",
+        choices=["gemini", "openai"],
+        default="gemini",
+        help="AI 提供商 (預設: gemini)"
+    )
+
+    # Gemini API 設定
+    parser.add_argument("--api-key", "-k", help="Gemini API 金鑰（也可設定環境變數 GEMINI_API_KEY）")
     parser.add_argument(
         "--gemini-model", "-gm",
         default="gemini-2.5-flash",
         help="Gemini 模型名稱 (預設: gemini-2.5-flash)"
     )
-    
+
+    # OpenAI API 設定
+    parser.add_argument("--openai-api-key", "-oak", help="OpenAI API 金鑰（也可設定環境變數 OPENAI_API_KEY）")
+    parser.add_argument(
+        "--openai-model", "-om",
+        default="gpt-4o",
+        help="OpenAI 模型名稱 (預設: gpt-4o)"
+    )
+
     # 語言設定
     parser.add_argument(
         "--source-lang", "-sl",
         default="zh",
         help="影片的原始語言 (預設: zh 中文，可用 auto 自動偵測)"
     )
-    
+
     parser.add_argument(
         "--translate", "-t",
         help="翻譯成目標語言 (例如: en, ja, ko, zh-TW 等)"
     )
-    
+
     # Whisper 設定
     parser.add_argument(
         "--whisper-model", "-w",
@@ -1510,7 +1647,7 @@ def main():
         choices=["tiny", "base", "small", "medium", "large"],
         help="Whisper 模型大小 (預設: base)"
     )
-    
+
     # AI 校正設定
     parser.add_argument("--prompt", "-p", help="自定義 AI 校正提示詞")
     parser.add_argument("--context", "-c", help="額外的上下文資訊")
@@ -1518,23 +1655,27 @@ def main():
     parser.add_argument(
         "--use-audio-context", "-uac",
         action="store_true",
-        help="使用音訊上下文進行多模態處理（Gemini 會同時分析音訊和字幕，提供更準確的校正）"
+        help="使用音訊上下文進行多模態處理（僅支援 Gemini，會同時分析音訊和字幕，提供更準確的校正）"
     )
-    
+
     # 跳過步驟的選項
     parser.add_argument(
         "--subtitle", "-sub",
         help="現有字幕檔案路徑（提供此選項將跳過下載和轉錄步驟）"
     )
-    
+
     parser.add_argument(
         "--only-embed", "-oe",
         action="store_true",
         help="僅執行字幕嵌入（需要同時提供 --video 和 --subtitle，跳過所有其他步驟包括 AI 校正）"
     )
-    
+
     args = parser.parse_args()
-    
+
+    # 解析 effective API keys（CLI 參數 > 環境變數）
+    effective_gemini_key = args.api_key or os.environ.get("GEMINI_API_KEY")
+    effective_openai_key = args.openai_api_key or os.environ.get("OPENAI_API_KEY")
+
     # 檢查 only-embed 模式的必要參數
     if args.only_embed:
         if not args.video or not args.subtitle:
@@ -1548,15 +1689,19 @@ def main():
             parser.error("--use-audio-context cannot be used with --only-embed (no AI processing in only-embed mode)")
         if args.skip_correction:
             parser.error("--use-audio-context cannot be used with --skip-correction (audio context is only used for AI correction)")
-    
+        if args.provider == "openai":
+            parser.error("--use-audio-context 僅支援 Gemini，請移除 --provider openai 或移除 --use-audio-context")
+
     # 檢查 API key（僅在需要 AI 處理時）
     # 注意：對於 YouTube 來源，可能會使用 CC 字幕並在互動選擇中跳過 AI，所以延後檢查
-    if not args.only_embed and not args.skip_correction and not args.api_key:
-        # 如果不是 YouTube 來源，現在就檢查
-        if not args.youtube:
-            parser.error("--api-key is required unless using --only-embed or --skip-correction")
-        # YouTube 來源會在後續根據使用者選擇決定是否需要 API key
-    
+    if not args.only_embed and not args.skip_correction:
+        if args.provider == "openai":
+            if not effective_openai_key and not args.youtube:
+                parser.error("使用 OpenAI 時需要 --openai-api-key 或在 .env 中設定 OPENAI_API_KEY")
+        else:
+            if not effective_gemini_key and not args.youtube:
+                parser.error("使用 Gemini 時需要 --api-key 或在 .env 中設定 GEMINI_API_KEY")
+
     # 檢查必要工具
     missing_tools = []
 
@@ -1570,21 +1715,21 @@ def main():
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
         print(f"❌ FFmpeg 檢查失敗: {e}")
         missing_tools.append("ffmpeg")
-    
+
     # 檢查 yt-dlp（僅在需要下載 YouTube 影片時）
     if args.youtube and not args.only_embed:
         try:
             subprocess.run(["yt-dlp", "--version"], capture_output=True, check=True, timeout=5)
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             missing_tools.append("yt-dlp")
-    
+
     # 檢查 whisper（僅在需要轉錄時）
     if not args.subtitle and not args.only_embed:
         try:
             import whisper
         except ImportError:
             missing_tools.append("whisper")
-    
+
     if missing_tools:
         print("❌ 缺少必要工具，請先安裝:")
         for tool in missing_tools:
@@ -1596,13 +1741,16 @@ def main():
                 print(f"  pip install static-ffmpeg")
                 print(f"  # 或者手動安裝: brew install ffmpeg (macOS)")
         sys.exit(1)
-    
+
     # 初始化處理器
     processor = VideoSubtitleProcessor(
-        gemini_api_key=args.api_key,  # 在 only-embed 模式下可以是 None
+        gemini_api_key=effective_gemini_key,
         whisper_model=args.whisper_model,
         source_language=args.source_lang,
-        gemini_model=args.gemini_model
+        gemini_model=args.gemini_model,
+        provider=args.provider,
+        openai_api_key=effective_openai_key,
+        openai_model=args.openai_model
     )
     
     # 開始處理
