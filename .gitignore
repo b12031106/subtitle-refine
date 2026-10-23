@@ -43,6 +43,7 @@ venv.bak/
 .claude/settings.local.json
 
 # Project specific
+audio/
 downloads/
 subtitles/
 output/
