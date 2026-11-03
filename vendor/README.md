@@ -1,7 +1,7 @@
 # Bundled subtitle-engine release
 
-- Distribution: subtitle-engine 0.1.1 (MIT; license included in wheel).
-- Source repository: private `b12031106/subtitle-engine`, commit `39ac006`.
+- Distribution: subtitle-engine 0.1.2 (MIT; license included in wheel).
+- Source repository: private `b12031106/subtitle-engine`, commit `d540712`.
   This wheel makes this consumer
   commit installable without GitHub access or reliance on a sibling directory.
 - SHA256SUMS fixes the exact shipped bytes. `python scripts/install_engine.py` verifies and

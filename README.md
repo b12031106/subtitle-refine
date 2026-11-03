@@ -334,14 +334,14 @@ media-cellar 下載節點負責取得 YouTube 字幕；`subtitle_worker.py` 不�
 
 驗證採本機 SRT/VTT fixture、假 AI／媒體處理與隔離 DB；確認不呼叫 Whisper、重試快取、改字幕／來源類型使後續快取失效、四種 artifact 與 media-cellar 模擬私人上傳接續。隔離測試不操作既有服務或真實授權。另於 2026-10-23 在獨立 media-cellar 測試節點完成真實英文自動字幕匯入（936 條文字字幕）、校正、繁中翻譯及約 20 分鐘影片燒錄；上傳後因 YouTube 帳號未驗證的片長限制而未完成平台處理。另有短片已完成私人上傳與狀態確認。
 
-## 共用 subtitle-engine 0.1.1 遷移
+## 共用 subtitle-engine 0.1.2 遷移
 
-`subtitle_refine.py` 與 `subtitle_worker.py` 現在是薄相容入口，實作由已安裝的 `subtitle-engine==0.1.1` 提供。
+`subtitle_refine.py` 與 `subtitle_worker.py` 現在是薄相容入口，實作由已安裝的 `subtitle-engine==0.1.2` 提供。
 舊 CLI argv、worker options、JSONL 和 manifest version 1 不變；`CELLAR_SUBTITLE_COMMAND` 無需改路徑。
 共用核心支援三階段獨立 provider 的 Python API；舊 provider/model 仍同時控制校正與翻譯。
 Runtime 只是文字 provider；Whisper 繼續是既有 ASR。這不是即時字幕插件。
 
-本 repo 附帶 `vendor/subtitle_engine-0.1.1-py3-none-any.whl` 與 SHA256SUMS；
+本 repo 附帶 `vendor/subtitle_engine-0.1.2-py3-none-any.whl` 與 SHA256SUMS；
 即使安裝機器無權讀取 private 的 engine GitHub repo，也不依賴相鄰 checkout。
 wheel 是 engine 原始碼建置的固定發行物。
 完整安裝仍在本 repo 根目錄執行 `python -m pip install -r requirements.txt`。
@@ -349,7 +349,7 @@ wheel 是 engine 原始碼建置的固定發行物。
 
 ```sh
 python scripts/install_engine.py
-python -c 'from importlib.metadata import version; assert version("subtitle-engine") == "0.1.1"'
+python -c 'from importlib.metadata import version; assert version("subtitle-engine") == "0.1.2"'
 python -m unittest discover -s tests -v
 ```
 
@@ -372,3 +372,9 @@ YouTube 來源字幕下載與任務鎖仍由 media-cellar 管理。回滾時一�
 普通自動字幕、手動 CC、Whisper 流程不套用此整理。匯入 checkpoint 版本提升，
 同一來源重試時會重建字幕與後續 AI／燒錄成品；Whisper 快取仍維持原規則。
 已完成的舊成品不會自動重做。
+
+### AI 輸出對不齊時切半重試（0.1.2）
+
+模型回傳的字幕若有空白／格式無效條目、條數不符，或改動序號／時間軸，
+現在會觸發既有的「切半重試」（最多 2 層），不再直接中斷整個校正／翻譯流程。
+來源字幕本身格式錯誤仍立即失敗、不重試。
