@@ -1,4 +1,4 @@
-./vendor/subtitle_engine-0.1.2-py3-none-any.whl
+./vendor/subtitle_engine-0.2.0-py3-none-any.whl
 # Core dependencies
 google-genai>=0.2.0
 openai-whisper>=20231117
@@ -11,3 +11,7 @@ static-ffmpeg>=2.5
 
 # System dependencies (automatically handled by static-ffmpeg)
 # FFmpeg will be automatically downloaded when installing static-ffmpeg
+
+# On-screen caption overlay (subtitle-engine-overlay, macOS only: Apple Vision OCR via swiftc)
+numpy>=1.24
+pillow>=10

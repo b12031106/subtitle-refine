@@ -334,14 +334,14 @@ media-cellar 下載節點負責取得 YouTube 字幕；`subtitle_worker.py` 不�
 
 驗證採本機 SRT/VTT fixture、假 AI／媒體處理與隔離 DB；確認不呼叫 Whisper、重試快取、改字幕／來源類型使後續快取失效、四種 artifact 與 media-cellar 模擬私人上傳接續。隔離測試不操作既有服務或真實授權。另於 2026-10-23 在獨立 media-cellar 測試節點完成真實英文自動字幕匯入（936 條文字字幕）、校正、繁中翻譯及約 20 分鐘影片燒錄；上傳後因 YouTube 帳號未驗證的片長限制而未完成平台處理。另有短片已完成私人上傳與狀態確認。
 
-## 共用 subtitle-engine 0.1.2 遷移
+## 共用 subtitle-engine 0.2.0 遷移
 
-`subtitle_refine.py` 與 `subtitle_worker.py` 現在是薄相容入口，實作由已安裝的 `subtitle-engine==0.1.2` 提供。
+`subtitle_refine.py` 與 `subtitle_worker.py` 現在是薄相容入口，實作由已安裝的 `subtitle-engine==0.2.0` 提供。
 舊 CLI argv、worker options、JSONL 和 manifest version 1 不變；`CELLAR_SUBTITLE_COMMAND` 無需改路徑。
 共用核心支援三階段獨立 provider 的 Python API；舊 provider/model 仍同時控制校正與翻譯。
 Runtime 只是文字 provider；Whisper 繼續是既有 ASR。這不是即時字幕插件。
 
-本 repo 附帶 `vendor/subtitle_engine-0.1.2-py3-none-any.whl` 與 SHA256SUMS；
+本 repo 附帶 `vendor/subtitle_engine-0.2.0-py3-none-any.whl` 與 SHA256SUMS；
 即使安裝機器無權讀取 private 的 engine GitHub repo，也不依賴相鄰 checkout。
 wheel 是 engine 原始碼建置的固定發行物。
 完整安裝仍在本 repo 根目錄執行 `python -m pip install -r requirements.txt`。
@@ -349,7 +349,7 @@ wheel 是 engine 原始碼建置的固定發行物。
 
 ```sh
 python scripts/install_engine.py
-python -c 'from importlib.metadata import version; assert version("subtitle-engine") == "0.1.2"'
+python -c 'from importlib.metadata import version; assert version("subtitle-engine") == "0.2.0"'
 python -m unittest discover -s tests -v
 ```
 
@@ -378,3 +378,17 @@ YouTube 來源字幕下載與任務鎖仍由 media-cellar 管理。回滾時一�
 模型回傳的字幕若有空白／格式無效條目、條數不符，或改動序號／時間軸，
 現在會觸發既有的「切半重試」（最多 2 層），不再直接中斷整個校正／翻譯流程。
 來源字幕本身格式錯誤仍立即失敗、不重試。
+
+### 畫面字翻譯（0.2.0，實驗性）
+
+把韓綜等節目後製的畫面字（編輯字幕、【標題】、旁白吐槽）在原位置翻譯：原字區域做柔邊模糊，
+再以量測到的字色、描邊與相近字級疊上譯文。招牌、衣物、道具、台標由視覺 LLM 判定後保留原樣。
+需要 macOS（Apple Vision OCR，首次使用以 `swiftc` 編譯小工具）與 local-chatgpt-runtime（或 `--provider openai`）。
+
+```sh
+python -m subtitle_engine.overlay VIDEO --out-dir output/onscreen --target zh-TW \
+  [--dialogue-srt 已翻譯對白.srt] [--context '박은영 = 朴恩英'] [--start 秒 --duration 秒]
+```
+
+產出 `<名稱>_onscreen_zh-TW.mp4`、`.ass`、`.json` 與逐句對照的 `.review.html`；
+中間結果快取在 `<名稱>.onscreen-work/`，中斷後可續跑。35 分鐘的影片約需 45 分鐘、750 次判讀。
