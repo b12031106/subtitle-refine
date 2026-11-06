@@ -26,7 +26,7 @@ struct NewJobView: View {
     @State private var dropTarget = false
     @State private var error: String?
 
-    init(settings: AppSettings? = nil, sampleData: Bool = false, sampleOverlay: Bool = false, sampleCollapsed: Bool = false,
+    init(settings: AppSettings? = nil, sampleData: Bool = false, sampleOverlay: Bool = false, sampleCollapsed: Bool = false, sampleBackground: Bool = false,
          submit: @escaping (JobSource, WorkerOptions, ProcessingOptions) -> Void) {
         self.settings = settings ?? AppSettings()
         self.submit = submit
@@ -35,6 +35,7 @@ struct NewJobView: View {
             var sample = WorkerOptions()
             sample.sourceLanguage = sampleOverlay ? "ko" : "en"
             sample.burnIn = true
+            sample.subtitleBackground = sampleBackground ? .box : .none
             sample.context = "subtitle 譯為字幕；채령 譯為彩領。"
             _options = State(initialValue: sample)
         }
@@ -88,6 +89,7 @@ struct NewJobView: View {
                             else { Text("不翻譯，保留來源語言。").font(.caption).foregroundStyle(.secondary) }
                             FormChoice(title: "Whisper 模型", selection: $options.whisperModel, values: ["tiny", "base", "small", "medium", "large"])
                             FormToggle(title: "將對白字幕燒錄到影片", isOn: $options.burnIn)
+                            SubtitleBackgroundControls(options: $options)
                         }
                     }
                     OverlayControls(settings: settings, provider: options.provider, dialogueEnabled: dialogueEnabled,

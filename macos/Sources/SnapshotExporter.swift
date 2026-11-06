@@ -20,7 +20,7 @@ import AppKit
         let artifacts = [JobArtifact(kind: "srt", path: "translated.srt"), JobArtifact(kind: "vtt", path: "translated.vtt"),
                          JobArtifact(kind: "corrected_srt", path: "corrected.srt"), JobArtifact(kind: "burned_video", path: "subtitled.mp4")]
         let settings = AppSettings(pythonPath: AppSettings.defaultPython)
-        settings.environmentReport = "subtitle_engine: 0.3.1\nwhisper: 可匯入\nyt_dlp: 可匯入\nstatic_ffmpeg: 可匯入\ntorch / cv2: 可匯入（選用）"
+        settings.environmentReport = "subtitle_engine: 0.3.2\nwhisper: 可匯入\nyt_dlp: 可匯入\nstatic_ffmpeg: 可匯入\ntorch / cv2: 可匯入（選用）"
         settings.checkedPython = settings.pythonPath
         settings.packageStatus = ["torch": true, "cv2": true]
         let unavailable = AppSettings(pythonPath: "/example/python-needs-environment-check")
@@ -41,6 +41,9 @@ import AppKit
             JobArtifact(kind: "overlay_review", path: "overlay/EP22.zh-TW.review.html"),
             JobArtifact(kind: "overlay_ass", path: "overlay/EP22.zh-TW.ass"),
             JobArtifact(kind: "overlay_events", path: "overlay/EP22.zh-TW.json")]
+        var backgroundComplete = completed
+        backgroundComplete.options.subtitleBackground = .box
+        backgroundComplete.options.subtitleBackgroundOpacity = 80
         var interrupted = overlayRunning
         interrupted.status = .interrupted
         interrupted.stage = "已中斷，可繼續；工作目錄與快取已保留"
@@ -54,12 +57,14 @@ import AppKit
             try render(WorkspaceSnapshot(job: nil), name: "empty-\(suffix)", size: CGSize(width: 1080, height: 720), scheme: scheme, directory: directory)
             try render(WorkspaceSnapshot(job: running), name: "running-\(suffix)", size: CGSize(width: 1080, height: 720), scheme: scheme, directory: directory)
             try render(WorkspaceSnapshot(job: completed, artifacts: artifacts), name: "completed-\(suffix)", size: CGSize(width: 1080, height: 800), scheme: scheme, directory: directory)
-            try render(NewJobView(sampleData: true) { _, _, _ in }, name: "new-job-\(suffix)", size: CGSize(width: 660, height: 1050), scheme: scheme, directory: directory)
+            try render(NewJobView(sampleData: true) { _, _, _ in }, name: "new-job-\(suffix)", size: CGSize(width: 660, height: 1150), scheme: scheme, directory: directory)
             try render(SettingsView(settings: settings), name: "settings-\(suffix)", size: CGSize(width: 650, height: 780), scheme: scheme, directory: directory)
-            try render(NewJobView(settings: settings, sampleData: true, sampleOverlay: true) { _, _, _ in }, name: "overlay-form-\(suffix)", size: CGSize(width: 660, height: 1250), scheme: scheme, directory: directory)
+            try render(NewJobView(settings: settings, sampleData: true, sampleOverlay: true) { _, _, _ in }, name: "overlay-form-\(suffix)", size: CGSize(width: 660, height: 1370), scheme: scheme, directory: directory)
             try render(WorkspaceSnapshot(job: overlayRunning), name: "overlay-running-\(suffix)", size: CGSize(width: 1080, height: 800), scheme: scheme, directory: directory)
             try render(WorkspaceSnapshot(job: overlayComplete, artifacts: overlayArtifacts), name: "overlay-completed-\(suffix)", size: CGSize(width: 1080, height: 880), scheme: scheme, directory: directory)
             try render(OverlaySettingsSnapshot(settings: settings, provider: .gemini, enabled: false), name: "overlay-gemini-\(suffix)", size: CGSize(width: 660, height: 400), scheme: scheme, directory: directory)
+            try render(NewJobView(sampleData: true, sampleBackground: true) { _, _, _ in }, name: "subtitle-bg-form-\(suffix)", size: CGSize(width: 660, height: 1150), scheme: scheme, directory: directory)
+            try render(WorkspaceSnapshot(job: backgroundComplete, artifacts: artifacts), name: "subtitle-bg-completed-\(suffix)", size: CGSize(width: 1080, height: 820), scheme: scheme, directory: directory)
             try render(WorkspaceSnapshot(job: interrupted), name: "interrupted-\(suffix)", size: CGSize(width: 1080, height: 720), scheme: scheme, directory: directory)
             try render(WorkspaceSnapshot(job: failed), name: "failed-\(suffix)", size: CGSize(width: 1080, height: 780), scheme: scheme, directory: directory)
             try render(NewJobView(sampleData: true, sampleCollapsed: true) { _, _, _ in }, name: "form-collapsed-\(suffix)", size: CGSize(width: 660, height: 850), scheme: scheme, directory: directory)

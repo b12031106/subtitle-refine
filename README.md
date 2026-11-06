@@ -341,7 +341,7 @@ media-cellar 下載節點負責取得 YouTube 字幕；`subtitle_worker.py` 不�
 共用核心支援三階段獨立 provider 的 Python API；舊 provider/model 仍同時控制校正與翻譯。
 Runtime 只是文字 provider；Whisper 繼續是既有 ASR。這不是即時字幕插件。
 
-本 repo 附帶 `vendor/subtitle_engine-0.3.1-py3-none-any.whl` 與 SHA256SUMS；
+本 repo 附帶 `vendor/subtitle_engine-0.3.2-py3-none-any.whl` 與 SHA256SUMS；
 即使安裝機器無權讀取 private 的 engine GitHub repo，也不依賴相鄰 checkout。
 wheel 是 engine 原始碼建置的固定發行物。
 完整安裝仍在本 repo 根目錄執行 `python -m pip install -r requirements.txt`。
@@ -349,7 +349,7 @@ wheel 是 engine 原始碼建置的固定發行物。
 
 ```sh
 python scripts/install_engine.py
-python -c 'from importlib.metadata import version; assert version("subtitle-engine") == "0.3.1"'
+python -c 'from importlib.metadata import version; assert version("subtitle-engine") == "0.3.2"'
 python -m unittest discover -s tests -v
 ```
 
@@ -396,3 +396,11 @@ python -m subtitle_engine.overlay VIDEO --out-dir output/onscreen --target zh-TW
 0.3.0 起可加 `--cover lama`：用 LaMa 修補抹除原文字形，不留模糊底；會動的字幕仍用模糊底。
 需另外 `pip install torch opencv-python-headless`；Apple GPU 上 EP.22 整集約 3.5 小時，中斷可續跑，
 輸出檔名加上 `_lama`。
+
+### 燒錄字幕底色（0.3.2）
+
+worker options 可設 `subtitle_background: "box"` 與整數 `subtitle_background_opacity: 80`（0–100）；
+預設 `none` 保持原樣。燒錄時以每行半透明黑底搭配白字，適合有密集投影片文字的影片；
+不修改 SRT／VTT。舊 CLI 同樣可用 `--subtitle-background box --subtitle-background-opacity 80`。
+worker 的底色設定只影響燒錄 checkpoint，不重新轉錄／校正／翻譯；引擎版本升級的實作 hash 失效規則仍保留。
+Mac 表單支援開關／不透明度滑桿，詳見 [macOS README](macos/README.md)。

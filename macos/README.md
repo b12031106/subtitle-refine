@@ -6,7 +6,7 @@
 
 - **Apple Silicon（arm64）、macOS 14 以上**。此發行包不含 Intel 版本。
 - **外部 Python 與引擎**：App 不內嵌 Python、模型或本機 AI 服務。這台機器驗證的 Python 為 `/Users/justinhsu/.pyenv/versions/3.12.0/bin/python`（Python 3.12）；其他機器請在 App 設定填入實際 Python 執行檔的絕對路徑，再按「檢查環境」。
-- 該 Python 需安裝 `subtitle-engine` **0.3.1**、`openai-whisper`、`yt-dlp`、`static-ffmpeg` 與引擎依賴。repo 的 `requirements.txt`／`vendor/` 提供安裝來源，見 [根目錄 README](../README.md)。請安裝在 App 設定指向的同一個 Python：
+- 該 Python 需安裝 `subtitle-engine` **0.3.2**、`openai-whisper`、`yt-dlp`、`static-ffmpeg` 與引擎依賴。repo 的 `requirements.txt`／`vendor/` 提供安裝來源，見 [根目錄 README](../README.md)。請安裝在 App 設定指向的同一個 Python：
 
   ```sh
   /path/to/python -m pip install -r requirements.txt
@@ -32,7 +32,7 @@ open macos/dist/SubtitleRefine.app
 1. 在設定確認 Python 並「檢查環境」。依提供商準備 Runtime 或 Keychain 金鑰。
 2. 按「新增工作」（⌘N），拖入／選擇影片或貼上 YouTube 連結。
 3. 選擇中文名稱的來源／目標語言；特殊語言可選「自行輸入語言代碼…」。來源「自動辨識」只適用來源語言，目標不可用 auto。
-4. 啟用對白字幕、翻譯畫面字或兩者。關閉區塊時細項收合；內容過長可以捲動，取消／加入佇列固定在表單底部。畫面字可只處理片段、選擇 blur／LaMa，或帶入同工作對白 SRT。
+4. 啟用對白字幕、翻譯畫面字或兩者。關閉區塊時細項收合；內容過長可以捲動，取消／加入佇列固定在表單底部。畫面字可只處理片段、選擇 blur／LaMa，或帶入同工作對白 SRT。勾選對白燒錄後可啟用「字幕底色」，以 0–100% 滑桿調整每行黑底的不透明度（預設 80%）；未勾燒錄時停用，SRT／VTT 不受影響。
 5. 工作依序執行，詳情顯示日誌與成品。影片可用 QuickTime 開啟、檔案可在 Finder 顯示；畫面字的「開啟驗收頁」會使用預設瀏覽器開啟本機原圖／成品對照 HTML。
 
 首次開始工作時，系統會詢問通知權限；完成／失敗通知不包含影片路徑或引擎診斷。可在 App 設定關閉通知，或於 macOS 系統設定調整權限；拒絕通知不影響影片處理。工作執行時 Dock 顯示進度條與百分比，取消時顯示停止中，閒置時清除。
@@ -79,7 +79,7 @@ swift macos/scripts/generate_icon.swift macos
 macos/scripts/snapshots.sh
 ```
 
-腳本重新產生專案、建置 Debug，再用 `SubtitleRefineProbe snapshots` 執行 SwiftUI ImageRenderer，於 `macos/.build/snapshots/` 產生 **28 張 PNG**（14 種情境各深／淺色）。含空清單、對白／畫面字執行與成品、設定、新增表單、Gemini／LaMa 不可用、中斷、失敗、兩區收合及短視窗固定按鈕列。
+腳本重新產生專案、建置 Debug，再用 `SubtitleRefineProbe snapshots` 執行 SwiftUI ImageRenderer，於 `macos/.build/snapshots/` 產生 **32 張 PNG**（16 種情境各深／淺色）。含空清單、對白／畫面字執行與成品、設定、新增表單、Gemini／LaMa 不可用、中斷、失敗、兩區收合及短視窗固定按鈕列。
 
 快照採固定假資料，不讀 Keychain 或真實工作，不需螢幕錄製權限。AppKit 文字輸入與 scroll 容器在 ImageRenderer 下以共用版面的唯讀內容代替；短視窗快照顯示捲動區頂端與固定頁尾，不模擬手勢捲動。測試使用 Vision OCR 檢查主內容、收合內容不可見與短視窗頁尾位置。
 
@@ -117,3 +117,33 @@ M4 真實中斷／重啟續跑驗證（另開兩個 Probe 程序；EP.22 的 sta
 ```
 
 輸出在 `macos/.build/m4-restart/`，`verification.json` 記錄同一工作的中斷／完成狀態與 clip、OCR、事件快取前後 SHA-256／mtime。此驗證確實呼叫本機 Runtime。
+
+## 字幕底色驗證
+
+背景功能需 subtitle-engine 0.3.2。舊工作載入預設為無底色；工作詳情顯示本次燒錄樣式。
+新增底色表單與成品深／淺色快照，全套共 32 張。
+以大量英文白字背景和 `say` 英文語音合成八秒短片，再經相同 JobRunner 以 local-runtime 執行兩次完整 worker：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python macos/scripts/run_subtitle_background_acceptance.py
+```
+
+成品與 none／box 抽格 PNG、亮度指標在 `macos/.build/subtitle-bg/`。同一版引擎只更改背景參數時，
+worker 只重新燒錄，不重跑轉錄／AI；升級引擎版本仍可能依原有實作 hash 規則使 AI 快取失效一次。
+
+真實快取與舊 CLI 驗證（先跑上述端對端腳本）：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python macos/scripts/verify_subtitle_background_cache.py
+```
+
+此腳本使用隔離副本驗證只改底色時 0 次 ASR／AI、1 次真實燒錄，相同選項重跑則 0 次媒體呼叫；
+另外實際執行舊 CLI 的 `--only-embed` 底色路徑。
+
+驗收調整後預設不透明度為 80%，逐行底塊留白約半個字高。沿用前次同一影片與 SRT 重燒比較：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python macos/scripts/render_subtitle_background80.py
+```
+
+輸出 `macos/.build/subtitle-bg/box80-frame.png` 與字高／padding／亮度量測 JSON，保留原 60% 抽格。

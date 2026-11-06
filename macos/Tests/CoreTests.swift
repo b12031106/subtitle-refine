@@ -30,7 +30,7 @@ final class CoreTests: XCTestCase {
         options.model = "  "
         let data = try JSONEncoder().encode(options)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(json.keys), Set(["provider", "target_language", "source_language", "whisper_model", "context", "burn_in", "skip_correction", "max_workers"]))
+        XCTAssertEqual(Set(json.keys), Set(["provider", "target_language", "source_language", "whisper_model", "context", "burn_in", "skip_correction", "max_workers", "subtitle_background", "subtitle_background_opacity"]))
         XCTAssertTrue(json["target_language"] is NSNull)
         XCTAssertNil(json["api_key"])
         XCTAssertNil(json["command"])

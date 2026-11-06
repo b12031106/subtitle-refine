@@ -8,8 +8,8 @@ import Vision
         defer { try? FileManager.default.removeItem(at: root) }
         try SnapshotExporter.export(to: root)
         let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-        XCTAssertEqual(files.filter { $0.pathExtension == "png" }.count, 28)
-        let required = ["empty": "開始製作字幕", "running": "translating", "completed": "QuickTime", "new-job": "Whisper", "settings": "API", "overlay-form": "LaMa", "overlay-running": "OCR", "overlay-completed": "驗收頁", "overlay-gemini": "Gemini", "overlay-lama-unavailable": "LaMa", "interrupted": "可繼續", "failed": "Python", "form-collapsed": "加入佇列", "form-compact": "加入佇列"]
+        XCTAssertEqual(files.filter { $0.pathExtension == "png" }.count, 32)
+        let required = ["empty": "開始製作字幕", "running": "translating", "completed": "QuickTime", "new-job": "Whisper", "settings": "API", "overlay-form": "LaMa", "overlay-running": "OCR", "overlay-completed": "驗收頁", "overlay-gemini": "Gemini", "overlay-lama-unavailable": "LaMa", "interrupted": "可繼續", "failed": "Python", "form-collapsed": "加入佇列", "form-compact": "加入佇列", "subtitle-bg-form": "80%", "subtitle-bg-completed": "半透明黑底"]
         for file in files {
             let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: file)))
             XCTAssertGreaterThan(bitmap.pixelsWide, 1000)

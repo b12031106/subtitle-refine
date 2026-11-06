@@ -92,8 +92,10 @@ import AppKit
                 try Data(manifest.utf8).write(to: root.appendingPathComponent("last-manifest-path.txt"), options: .atomic)
                 print("MANIFEST: " + manifest)
                 print(try String(contentsOfFile: manifest, encoding: .utf8))
-            case "e2e":
-                guard args.count == 4 else { throw AppError(message: "e2e VIDEO DIR WORKER") }
+            case "e2e", "background":
+                guard (mode == "e2e" && args.count == 4) || (mode == "background" && args.count == 5) else {
+                    throw AppError(message: "e2e VIDEO DIR WORKER | background VIDEO DIR WORKER none|box")
+                }
                 let root = URL(fileURLWithPath: args[2])
                 let store = JobStore(root: root)
                 let runner = JobRunner(store: store, settings: AppSettings(pythonPath: AppSettings.defaultPython),
@@ -102,6 +104,11 @@ import AppKit
                 options.sourceLanguage = "en"
                 options.targetLanguage = "zh-TW"
                 options.burnIn = true
+                if mode == "background" {
+                    guard let background = SubtitleBackground(rawValue: args[4]) else { throw AppError(message: "Invalid background") }
+                    options.subtitleBackground = background
+                    options.subtitleBackgroundOpacity = 80
+                }
                 options.context = "A short demonstration about automatic subtitles and translation. Preserve English during source correction."
                 guard let id = runner.enqueue(source: .local(URL(fileURLWithPath: args[1]).path), options: options) else {
                     throw AppError(message: runner.errorMessage ?? "Cannot enqueue")

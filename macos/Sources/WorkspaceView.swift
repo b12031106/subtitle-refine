@@ -91,6 +91,12 @@ struct JobDetailView: View {
                     GridRow { Text("來源語言").foregroundStyle(.secondary); Text(LanguageCatalog.title(job.options.sourceLanguage)) }
                 }
                 if job.request.dialogueEnabled { GridRow { Text("Whisper").foregroundStyle(.secondary); Text(job.options.whisperModel) } }
+                if job.request.dialogueEnabled && job.options.burnIn {
+                    GridRow {
+                        Text("字幕底色").foregroundStyle(.secondary)
+                        Text(job.options.subtitleBackground == .box ? "半透明黑底（不透明度 \(job.options.subtitleBackgroundOpacity)%）" : "無底色")
+                    }
+                }
                 if let overlay = job.request.overlay {
                     GridRow { Text("畫面字").foregroundStyle(.secondary); Text("\(overlay.cover.title) · \(LanguageCatalog.title(overlay.targetLanguage))") }
                     if let start = overlay.start, let duration = overlay.duration {

@@ -1,3 +1,243 @@
+# 字幕底色驗收調整：80% 與較寬留白
+
+日期：2026-11-06。已完成本次調整；**未 commit／tag／push**。
+
+- 引擎 worker、共用燒錄 helper、舊 CLI／processor、Mac 表單與缺欄位的預設值，全部改為 **80%**。背景模式預設仍為 none；已明確儲存的 60% 會保留，不改寫既有使用者選擇。
+- 每行底塊維持 BorderStyle 3，padding 由 Outline 3 增至 **Outline 4**。以實際文字量測，可見字高 26 px，左右各 **12 px**、上下各 **17 px**，接近半個字高；不是只改 opacity。
+- 沿用上次同一支八秒講稿影片、同一份已翻譯 SRT，使用正式共用燒錄實作的預設 80% 重燒；沒有重新生成字幕或重跑 AI。成品保留音軌且完整解碼通過。
+- 0.3.2 尚未提交版本已重建 wheel、更新 vendor SHA256SUMS，並以 scripts/install_engine.py 重新安裝。16 個 package Python 檔案與原始碼／wheel／安裝內容逐一相同，已驗證安裝後的 default=80 與 Outline=4。
+
+## 本次抽格與成品
+
+- **[box80-frame.png](.build/subtitle-bg/box80-frame.png)**（同片段第 3 秒，已實際檢視）
+- [原 60% 抽格](.build/subtitle-bg/box-frame.png)（保留未覆寫）
+- [80% 影片](.build/subtitle-bg/box80/lecture-eight-seconds_with_subtitles.mp4)
+- [亮度、字高與四邊留白量測](.build/subtitle-bg/box80-verification.json)
+- [純色背景的 padding 量測圖](.build/subtitle-bg/box80/padding-proof.png)
+- [80% 表單淺色](.build/snapshots/subtitle-bg-form-light.png)／[深色](.build/snapshots/subtitle-bg-form-dark.png)
+- [工作詳情淺色](.build/snapshots/subtitle-bg-completed-light.png)／[深色](.build/snapshots/subtitle-bg-completed-dark.png)
+
+同一固定字幕 ROI 的灰階平均亮度由 **98.8591 → 93.1411**，6,617 個像素進一步降低超過 20；畫面上半部平均像素差為 **0**。80% 仍保留 20% 背景透度，並非完全不透明；原本底下的英文已明顯變暗。
+
+可重跑（repo 根目錄，使用已安裝的引擎）：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python macos/scripts/render_subtitle_background80.py
+```
+
+## 測試、快照與打包
+
+- 引擎：`PYTHONPATH=src python -m unittest discover -s tests -v`，**Ran 61 tests in 7.065s，OK**；包含嚴格驗證、快取與真實燒錄亮度。
+- Consumer：指定 Python 的 `-m unittest discover -s tests -v`，**Ran 19 tests in 1.926s，OK**。
+- Mac 完整 build test：**BUILD SUCCEEDED、TEST SUCCEEDED；35 項、1 項既有 Keychain -25308 跳過、0 失敗**，30.223（30.237）秒。
+- `macos/scripts/snapshots.sh` 退出 0，全部 **32 張** PNG 重產；底色表單 OCR 檢查已改為 80%。
+- `macos/scripts/release.sh` 退出 0，Release App／zip 更新，ad-hoc 簽章驗證通過。
+
+Mac 測試指令：
+
+```sh
+xcodegen generate --spec macos/project.yml
+xcodebuild -project macos/SubtitleRefine.xcodeproj -scheme SubtitleRefine \
+  -configuration Debug -derivedDataPath macos/.build \
+  -destination 'platform=macOS,arch=arm64' \
+  -resultBundlePath macos/.build/SubtitleBackground80-tests.xcresult \
+  CODE_SIGN_IDENTITY=- build test
+macos/scripts/snapshots.sh
+macos/scripts/release.sh
+```
+
+結果包：`macos/.build/SubtitleBackground80-tests.xcresult`。實際日誌：[引擎](.build/subtitle-bg/box80-engine.log)、[Mac](.build/subtitle-bg/box80-app.log)、[consumer](.build/subtitle-bg/box80-consumer.log)、[重燒](.build/subtitle-bg/box80-render.log)、[快照](.build/subtitle-bg/box80-snapshots.log)、[Release](.build/subtitle-bg/box80-release.log)。
+
+新 wheel SHA-256：`4dd92c759aa00a17427dfb0f321653c068375c1866e558ffa356a03b60472edf`。詳見 [安裝／內容驗證](.build/subtitle-bg/box80-install-verification.json)、[wheel build](.build/subtitle-bg/box80-wheel.log)、[install](.build/subtitle-bg/box80-install.log)。
+
+---
+
+# 上一輪字幕底色實作與驗證（當時預設 60%）
+
+# 字幕底色功能：subtitle-engine 0.3.2、vendor 與 Mac App
+
+日期：2026-11-06。依 `TASK-subtitle-background.md` 完成兩個 repo 的實作與實測。**沒有 commit／tag／push，沒有部署或重啟本機 Runtime。**
+
+已完成可選的每行半透明黑底（預設關閉，啟用時預設 60% 不透明度）、獨立燒錄快取、舊 CLI、Mac 表單／詳情／舊工作相容、0.3.2 wheel 與安裝。兩次 App JobRunner 真實 local-runtime 流程都成功，繁中成品已抽格檢視。最後引擎 **61/61**、consumer **19/19** 測試通過，Mac **35 項、1 跳過、0 失敗**；全部 **32 張** SwiftUI 快照已重產，Release App／zip 也已更新。
+
+## 先看成品
+
+- [沒有底色：none-frame.png](.build/subtitle-bg/none-frame.png)
+- [60% 黑底：box-frame.png](.build/subtitle-bg/box-frame.png)
+- [開啟底色的表單（淺色）](.build/snapshots/subtitle-bg-form-light.png)／[深色](.build/snapshots/subtitle-bg-form-dark.png)
+- [工作詳情的底色設定（淺色）](.build/snapshots/subtitle-bg-completed-light.png)／[深色](.build/snapshots/subtitle-bg-completed-dark.png)
+- [Release App](dist/SubtitleRefine.app)／[zip](dist/SubtitleRefine-macOS-arm64.zip)
+
+## 引擎改動
+
+位置：`/Users/justinhsu/work/b12031106/subtitle-engine`，main 基於 `fb414a9`，保留本次未提交修改。
+
+- 新增 `burn.py`，讓 worker 與舊 processor／CLI 的 box 燒錄共用 libass 樣式；固定相對 `subtitle.srt` 與工作 cwd，避免使用者路徑成為 filter 語法。
+- worker options 新增 `subtitle_background`，僅接受字串 `none`／`box`（預設 none）；`subtitle_background_opacity` 僅接受 **整數 0–100**（預設 60），拒絕 bool、float、字串、null、超界值；未知欄位仍拒絕。
+- box 使用 `BorderStyle=3,PrimaryColour=&H00FFFFFF,OutlineColour=&H66000000,BackColour=&H66000000,Outline=3,Shadow=0`（60% 時）。ASS alpha 是透明度：0% 不透明度 → FF、60% → 66、100% → 00。
+- none 保留原 worker `subtitles=subtitle.srt` 外觀。開關只影響燒錄影片，不修改 SRT／VTT 文字或時間軸；`burn_in` 未啟用時不套用底色。
+- 文字階段 signature 排除 burn_in 與兩個背景欄位；新增燒錄 signature，包含影片 hash、最終 SRT hash、背景模式、不透明度及 render version。切換底色／不透明度只失效燒錄，不失效轉錄、校正或翻譯；同樣參數再次執行沿用影片。失敗不發布 manifest／完成結果。
+- 舊 `processor.embed_subtitle_to_video`／`process` 加入同名參數，CLI 加 `--subtitle-background box --subtitle-background-opacity 60`。box 若燒錄失敗即報錯，不用軟字幕 fallback 假裝完成；none 保留舊路徑。舊 CLI 本身沒有 worker checkpoint，但 `--only-embed` 可直接用既有字幕重新燒錄。
+- 引擎版本與 README 更新為 0.3.2。新增 options／快取／CLI 共用樣式／真實 ffmpeg 燒錄亮度測試，以及可重跑的 BorderStyle 比較腳本。
+
+### BorderStyle 3 與 4 實際比較
+
+static_ffmpeg 中 libass **0.15.2**（API 0x1502000）。使用相同密集英文白字背景、長短兩行繁中 SRT、相同 alpha／padding，實際透過 ffmpeg 渲染：
+
+- [BorderStyle 3](.build/subtitle-bg/borderstyle-3.png)：每行底塊按各自行寬，短行旁邊不蓋色。
+- [BorderStyle 4](.build/subtitle-bg/borderstyle-4.png)：兩行包成同一個大矩形，短行兩側也變暗。
+- [無底色](.build/subtitle-bg/borderstyle-none.png)、[libass 版本日誌](.build/subtitle-bg/libass-version.log)、[量測 JSON](.build/subtitle-bg/borderstyle-comparison.json)。
+
+取短行左側、位於長行寬度內的固定 ROI（x 380–500、y 665–700），灰階平均亮度：none **115.49**、style 3 **115.49**、style 4 **45.72**。搭配實際 PNG 檢視，選擇符合「每行一塊」要求的 style 3。
+
+重跑比較（repo 根目錄）：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python \
+  ../subtitle-engine/scripts/compare_subtitle_background.py \
+  macos/.build/subtitle-bg
+```
+
+## vendor 與安裝
+
+使用引擎原有 wheel 建置流程：
+
+```sh
+cd /Users/justinhsu/work/b12031106/subtitle-engine
+SOURCE_DATE_EPOCH=1792771200 /Users/justinhsu/.pyenv/versions/3.12.0/bin/python \
+  -m pip wheel --no-deps --wheel-dir dist .
+```
+
+實際成功產出 `subtitle_engine-0.3.2-py3-none-any.whl`，63,904 bytes，SHA-256：
+
+```text
+e44d7b6e632d931164256b89c5b2d1bc779a71c526a9e1bc96bfe69f6a677c09
+```
+
+已複製到 `subtitle-refine/vendor/`，更新 SHA256SUMS、requirements.txt、vendor README 與主 README；0.3.1 舊 wheel 原檔保留，當前安裝與 checksum 指向 0.3.2。確認沒有執行中的 worker／overlay 後，用既有腳本安裝：
+
+```sh
+cd /Users/justinhsu/work/b12031106/subtitle-refine
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python scripts/install_engine.py
+```
+
+實際 `Successfully installed subtitle-engine-0.3.2`；未更新其他依賴。`importlib.metadata.version` 與 `subtitle_engine.__version__` 都是 0.3.2，**16 個 package Python 檔案的 source／wheel／已安裝內容逐一 byte 相同**。Checksum 在 vendor 目錄檢查通過。
+
+## Mac App 改動
+
+- `WorkerOptions` 加入背景 enum 與整數 opacity，寫入 worker JSON；加入舊工作缺欄位時 none／60 的 decode fallback，保留既有工作清單可讀性，拒絕不合法 opacity。
+- 燒錄開關下方加入「字幕底色（每行半透明黑底）」與 0–100% 滑桿；燒錄未勾時底色開關停用，滑桿在未燒錄／未啟用底色時停用。兩區收合、捲動與固定頁尾維持。
+- 工作詳情顯示無底色或半透明黑底及不透明度。
+- 增加 WorkerOptions round trip／舊工作／不合法值／JobStore 寫入測試；增加底色表單、底色成品兩個情境各深淺色，共 32 張快照。
+- Probe 新增 `background VIDEO DIR WORKER none|box`，仍直接使用 App 正式 JobRunner 與 worker 路徑，沒有另外實作字幕流程。
+
+## 真實 App 端對端測試與亮度證據
+
+已執行：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python \
+  macos/scripts/run_subtitle_background_acceptance.py
+```
+
+以 macOS `say`（Samantha）產生英文語音，static_ffmpeg 合成 1280×720、24 fps、8 秒短片，整個畫面包含大量英文白字。none／box 為兩個獨立 App JobRunner 工作，provider local-runtime、Whisper base、來源 en、翻譯 zh-TW、真實校正／翻譯／燒錄全部完成，成品保留音訊且通過完整 ffmpeg 解碼。
+
+兩支成品在第 3 秒各抽一格；該格兩次翻譯文字相同：「大家好，今天我們要測試字幕」。在固定字幕區域 x 128–1152、y 610–710 比較灰階：
+
+| 指標 | 實際數值 |
+| --- | --- |
+| none 平均亮度 | 104.5590 |
+| box 60% 平均亮度 | 98.8591 |
+| 亮度降低超過 30 的像素 | 12,481 |
+| 上半部 y < 500 平均絕對像素差 | 0.0 |
+
+因此量測到字幕區域的底色變暗，其他畫面維持一致。兩張 PNG 均已檢視；完整路徑、options、成品大小／SHA-256、時長與量測位於 [verification.json](.build/subtitle-bg/verification.json)。
+
+### none 實際成品
+
+- [manifest](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/none/jobs/3C76AD70-B0E3-4B54-BE8F-7A04D85D5160/output/manifest.json>)
+- [抽格 PNG](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/none-frame.png>)
+- [burned_video](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/none/jobs/3C76AD70-B0E3-4B54-BE8F-7A04D85D5160/output/subtitled.mp4>)
+- [srt](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/none/jobs/3C76AD70-B0E3-4B54-BE8F-7A04D85D5160/output/subtitle.srt>)
+- [vtt](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/none/jobs/3C76AD70-B0E3-4B54-BE8F-7A04D85D5160/output/subtitle.vtt>)
+- [corrected_srt](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/none/jobs/3C76AD70-B0E3-4B54-BE8F-7A04D85D5160/output/corrected.srt>)
+- [完整工作日誌](.build/subtitle-bg/none-run.log)
+
+### box 實際成品
+
+- [manifest](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/box/jobs/D4E7094E-9BA0-4F48-8E27-3FBA541C8D88/output/manifest.json>)
+- [抽格 PNG](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/box-frame.png>)
+- [burned_video](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/box/jobs/D4E7094E-9BA0-4F48-8E27-3FBA541C8D88/output/subtitled.mp4>)
+- [srt](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/box/jobs/D4E7094E-9BA0-4F48-8E27-3FBA541C8D88/output/subtitle.srt>)
+- [vtt](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/box/jobs/D4E7094E-9BA0-4F48-8E27-3FBA541C8D88/output/subtitle.vtt>)
+- [corrected_srt](</Users/justinhsu/work/b12031106/subtitle-refine/macos/.build/subtitle-bg/box/jobs/D4E7094E-9BA0-4F48-8E27-3FBA541C8D88/output/corrected.srt>)
+- [完整工作日誌](.build/subtitle-bg/box-run.log)
+
+### 真實快取只重新燒錄、舊 CLI 實測
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python \
+  macos/scripts/verify_subtitle_background_cache.py
+```
+
+腳本複製真實 none 工作的快取到隔離 `cache-reburn/`，只把背景改 box；對 ASR／AI 加入「一旦被呼叫就失敗」的測試 guard，媒體仍使用真實 ffmpeg。結果：**1 次燒錄、0 次 Whisper、0 次 AI**；transcribed.srt／corrected.srt／subtitle.srt 的 hash 與 mtime_ns 前後一致，文字 signature 不變、burn signature 改變。相同 box 選項再跑一次，媒體呼叫增加 **0**。
+
+同一腳本另以已安裝的舊 CLI `python -m subtitle_engine.cli --only-embed --subtitle-background box --subtitle-background-opacity 60` 真實燒錄成功。這是舊 CLI 的實際執行，不只是參數單元測試。
+
+- [快取驗證](.build/subtitle-bg/cache-verification.json)／[日誌](.build/subtitle-bg/cache.log)
+- [舊 CLI 日誌](.build/subtitle-bg/legacy-cli.log)
+- [舊 CLI 成品](.build/subtitle-bg/legacy/output/lecture-eight-seconds_with_subtitles.mp4)
+
+## 最後建置與測試結果
+
+引擎 repo：
+
+```sh
+PYTHONPATH=src /Users/justinhsu/.pyenv/versions/3.12.0/bin/python \
+  -m unittest discover -s tests -v
+```
+
+實際：`Ran 61 tests in 7.018s`、`OK`，包含真實短片 none／box 燒錄；字幕區域有 3,540 個像素降低超過 30，固定中心 ROI 亦符合亮度下降測試。
+
+subtitle-refine repo：
+
+```sh
+/Users/justinhsu/.pyenv/versions/3.12.0/bin/python -m unittest discover -s tests -v
+xcodegen generate --spec macos/project.yml
+xcodebuild -project macos/SubtitleRefine.xcodeproj -scheme SubtitleRefine \
+  -configuration Debug -derivedDataPath macos/.build \
+  -destination 'platform=macOS,arch=arm64' \
+  -resultBundlePath macos/.build/SubtitleBackground-tests.xcresult \
+  CODE_SIGN_IDENTITY=- build test
+macos/scripts/snapshots.sh
+macos/scripts/release.sh
+```
+
+實際：consumer `Ran 19 tests in 2.197s`、`OK`；Mac `BUILD SUCCEEDED`、`TEST SUCCEEDED`：
+
+```text
+Executed 35 tests, with 1 test skipped and 0 failures (0 unexpected) in 31.710 (31.724) seconds
+```
+
+唯一跳過為既有 Keychain -25308 互動限制。快照與 Release 腳本均退出 0；32 張 PNG 全數重產並通過 OCR／不支援元件檢查。更新後的 Release App ad-hoc 簽章驗證與 zip CRC 檢查通過。
+
+- [引擎測試](.build/subtitle-bg/engine-tests.log)／[consumer 測試](.build/subtitle-bg/consumer-tests.log)
+- [Mac build test](.build/subtitle-bg/app-build-test.log)／結果包：`macos/.build/SubtitleBackground-tests.xcresult`
+- [wheel build](.build/subtitle-bg/wheel-build.log)／[install](.build/subtitle-bg/install.log)
+- [快照](.build/subtitle-bg/snapshots.log)／[Release](.build/subtitle-bg/release.log)
+- [Release checksum 與檢查](.build/subtitle-bg/release-verification.json)
+
+## 保留事項
+
+- 0.3.2 內只改背景設定已證明不重跑 AI；**從舊引擎版本升級**仍遵守既有 package 實作 hash 規則，AI／燒錄可能失效一次，Whisper 快取保持沿用。沒有暗改此既有版本失效政策。
+- 舊 CLI 沒有 worker 的持久化 checkpoint；要只重燒可使用 `--only-embed`。其 box 與 worker 共用同一個 filter。
+- 這次未修改／重設 Runtime 或金鑰；真實工作日誌及 jobs JSON 的 runtime key 精確值掃描通過。影音、抽格、測試與 Release 都在被忽略的 `.build/`／`dist/`；只有版本化 wheel 依需求放入 vendor。
+- 無阻塞；兩個 repo 均未 commit／tag／push。
+
+---
+
+# 先前里程碑回報
+
 # M4 實作與驗證回報
 
 日期：2026-11-06。分支：`feat/macos-app`。**未 commit、未 push、未部署。**
